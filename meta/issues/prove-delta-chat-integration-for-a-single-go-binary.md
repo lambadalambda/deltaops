@@ -26,3 +26,12 @@ Validate the Delta Chat integration approach before building the monitor around 
 
 - Do this before implementing monitor checks.
 - If automatic registration depends on a specific provider class, document that as an MVP constraint instead of hiding it behind generic wording.
+
+## Resolution
+
+- Decision recorded in `../decisions/0001-delta-chat-integration.md`.
+- MVP path is `github.com/chatmail/rpc-client-go/v2` with a managed `deltachat-rpc-server` subprocess.
+- One-file operator distribution remains possible by embedding the platform-specific RPC server helper into each release binary, but the implementation is not pure Go.
+- The MVP account provisioning path is explicit operator input with a chatmail `dcaccount:` URL; provider-neutral email account auto-registration is out of scope.
+- End-to-end account configuration was not exercised because this spike did not have a usable `dcaccount:` provisioning URL; the next account provisioning issue should test `AddTransportFromQr` with a real or hermetic provisioning input.
+- The Delta Chat adapter contract is represented by `internal/notify.Transport` and covered with a fake-backed test.
