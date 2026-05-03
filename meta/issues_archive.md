@@ -1,0 +1,5 @@
+- [x] [Prove Delta Chat integration for a single Go binary](issues/prove-delta-chat-integration-for-a-single-go-binary.md)
+- [x] [Define Delta Chat account provisioning flow](issues/define-delta-chat-account-provisioning-flow.md)
+- [x] [Implement configuration and state layout](issues/implement-configuration-and-state-layout.md)
+- [x] [Implement pairing-code contact binding](issues/implement-first-contact-binding.md)
+- [x] [Select MVP operating systems and metric sources](issues/select-mvp-operating-systems-and-metric-sources.md)
