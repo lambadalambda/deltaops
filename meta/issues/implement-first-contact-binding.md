@@ -26,3 +26,14 @@ Bind DeltaOps to the first Delta Chat contact that proves possession of the setu
 
 - Depends on the Delta Chat integration, account provisioning, and state layout decisions.
 - Keep binding logic independent from the Delta Chat adapter so race cases are testable.
+
+## Resolution
+
+- Binding logic is implemented in `internal/binding` independently from the Delta Chat adapter.
+- An unbound manager requires a setup code and binds only the first message containing that code.
+- Messages without the setup code are ignored before binding.
+- Once bound, later contacts receive an `already_bound` result and cannot steal the binding.
+- The selected contact persists to `<state>/binding.json` through `FileStore` and is loaded on restart.
+- Reset is implemented by `Manager.Reset`, which deletes the binding file and clears the in-memory setup code; rebinding requires a fresh manager with a new setup code.
+- The documented MVP operator path is to stop DeltaOps, delete `<state>/binding.json`, and restart with a new setup code.
+- Tests cover first valid message wins, invalid messages cannot bind, restart persistence, later-contact rejection, reset, missing setup-code errors, loaded binding validation, and concurrent valid messages.
