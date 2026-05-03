@@ -1,8 +1,10 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -56,6 +58,31 @@ func TestRunnerWaitsForPairingWhenUnbound(t *testing.T) {
 	}
 	if pairer.waits != 1 {
 		t.Fatalf("pairing waits = %d, want 1", pairer.waits)
+	}
+}
+
+func TestRunnerLogsLifecycleEvents(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	contact := binding.Contact{ID: "contact-1"}
+	logger := &fakeLogger{}
+	sleeper := &fakeSleeper{onSleep: func(int, time.Duration) { cancel() }}
+	runner := newTestRunner(t, Dependencies{
+		Account:   &fakeAccount{},
+		Pairer:    &fakePairer{paired: contact},
+		Collector: &fakeCollector{samples: [][]collector.Sample{{}}},
+		Evaluator: &fakeEvaluator{decisions: [][]alert.Decision{{{Kind: alert.KindAlert, Metric: collector.MetricDiskUsedPercent, Target: "/", Severity: alert.SeverityCritical}}}},
+		Notifier:  &fakeNotifier{},
+		Sleeper:   sleeper,
+		Logger:    logger,
+	})
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	for _, name := range []string{"runtime_starting", "account_ready", "pairing_waiting", "pairing_bound", "alert_decision", "notification_sent", "runtime_shutdown"} {
+		if !logger.has(name) {
+			t.Fatalf("missing log event %q in %#v", name, logger.events)
+		}
 	}
 }
 
@@ -168,6 +195,114 @@ func TestRunnerRetriesNotificationFailureWithBackoff(t *testing.T) {
 	}
 }
 
+func TestRunnerStopsAfterBoundedNotificationRetries(t *testing.T) {
+	contact := binding.Contact{ID: "contact-1"}
+	logger := &fakeLogger{}
+	runner, err := NewRunner(Config{PollInterval: time.Minute, InitialBackoff: time.Second, MaxBackoff: 2 * time.Second, MaxNotifyAttempts: 2}, Dependencies{
+		Account:   &fakeAccount{},
+		Pairer:    &fakePairer{bound: &contact},
+		Collector: &fakeCollector{samples: [][]collector.Sample{{}}},
+		Evaluator: &fakeEvaluator{decisions: [][]alert.Decision{{{Kind: alert.KindAlert, Metric: collector.MetricDiskUsedPercent}}}},
+		Notifier:  &fakeNotifier{errors: []error{errors.New("send failed"), errors.New("still failed")}},
+		Sleeper:   &fakeSleeper{},
+		Logger:    logger,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner returned error: %v", err)
+	}
+
+	err = runner.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run returned nil error, want bounded retry failure")
+	}
+	if !strings.Contains(err.Error(), "next action") || !strings.Contains(err.Error(), "Delta Chat") {
+		t.Fatalf("error %q does not include operator next action", err)
+	}
+	if !logger.has("notification_failed") {
+		t.Fatalf("missing notification_failed event in %#v", logger.events)
+	}
+}
+
+func TestRunnerBoundsReadinessAfterNotificationFailure(t *testing.T) {
+	contact := binding.Contact{ID: "contact-1"}
+	runner, err := NewRunner(Config{PollInterval: time.Minute, InitialBackoff: time.Second, MaxBackoff: 2 * time.Second, MaxNotifyAttempts: 2}, Dependencies{
+		Account:   &fakeAccount{errors: []error{nil, errors.New("account offline")}},
+		Pairer:    &fakePairer{bound: &contact},
+		Collector: &fakeCollector{samples: [][]collector.Sample{{}}},
+		Evaluator: &fakeEvaluator{decisions: [][]alert.Decision{{{Kind: alert.KindAlert, Metric: collector.MetricDiskUsedPercent}}}},
+		Notifier:  &fakeNotifier{errors: []error{errors.New("send failed")}},
+		Sleeper:   &fakeSleeper{},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner returned error: %v", err)
+	}
+
+	err = runner.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run returned nil error, want bounded readiness failure")
+	}
+	if !strings.Contains(err.Error(), "account not ready") || !strings.Contains(err.Error(), "next action") {
+		t.Fatalf("error %q does not include bounded readiness next action", err)
+	}
+}
+
+func TestRunnerRedactsRuntimeFailureLogsAndOperatorError(t *testing.T) {
+	var out bytes.Buffer
+	secretErr := errors.New("send failed setup_code=123456 token=abc body=raw message dcaccount:secret")
+	contact := binding.Contact{ID: "contact-1"}
+	runner, err := NewRunner(Config{PollInterval: time.Minute, MaxNotifyAttempts: 1}, Dependencies{
+		Account:   &fakeAccount{},
+		Pairer:    &fakePairer{bound: &contact},
+		Collector: &fakeCollector{samples: [][]collector.Sample{{}}},
+		Evaluator: &fakeEvaluator{decisions: [][]alert.Decision{{{Kind: alert.KindAlert, Metric: collector.MetricDiskUsedPercent}}}},
+		Notifier:  &fakeNotifier{errors: []error{secretErr}},
+		Sleeper:   &fakeSleeper{},
+		Logger:    NewJSONLogger(&out),
+	})
+	if err != nil {
+		t.Fatalf("NewRunner returned error: %v", err)
+	}
+
+	err = runner.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run returned nil error, want notification failure")
+	}
+	combined := out.String() + err.Error()
+	for _, secret := range []string{"123456", "token=abc", "raw message", "dcaccount:secret"} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("runtime output leaked secret %q in %q", secret, combined)
+		}
+	}
+}
+
+func TestRunnerRejectsPendingDecisionQueueOverflow(t *testing.T) {
+	contact := binding.Contact{ID: "contact-1"}
+	logger := &fakeLogger{}
+	runner, err := NewRunner(Config{PollInterval: time.Minute, MaxPendingNotifications: 1}, Dependencies{
+		Account:   &fakeAccount{},
+		Pairer:    &fakePairer{bound: &contact},
+		Collector: &fakeCollector{samples: [][]collector.Sample{{}}},
+		Evaluator: &fakeEvaluator{decisions: [][]alert.Decision{{{Kind: alert.KindAlert, Metric: collector.MetricDiskUsedPercent}, {Kind: alert.KindRecovery, Metric: collector.MetricMemoryPressurePercent}}}},
+		Notifier:  &fakeNotifier{},
+		Sleeper:   &fakeSleeper{},
+		Logger:    logger,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner returned error: %v", err)
+	}
+
+	err = runner.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run returned nil error, want queue limit error")
+	}
+	if !strings.Contains(err.Error(), "pending notifications") || !strings.Contains(err.Error(), "next action") {
+		t.Fatalf("error %q does not explain queue limit next action", err)
+	}
+	if !logger.has("notification_queue_full") {
+		t.Fatalf("missing notification_queue_full event in %#v", logger.events)
+	}
+}
+
 func TestNewRunnerRejectsNegativeDurations(t *testing.T) {
 	deps := Dependencies{
 		Account:   &fakeAccount{},
@@ -181,6 +316,26 @@ func TestNewRunnerRejectsNegativeDurations(t *testing.T) {
 		{PollInterval: -time.Second},
 		{InitialBackoff: -time.Second},
 		{MaxBackoff: -time.Second},
+	}
+	for _, config := range tests {
+		if _, err := NewRunner(config, deps); err == nil {
+			t.Fatalf("NewRunner(%#v) returned nil error, want validation error", config)
+		}
+	}
+}
+
+func TestNewRunnerRejectsInvalidQueueAndRetryLimits(t *testing.T) {
+	deps := Dependencies{
+		Account:   &fakeAccount{},
+		Pairer:    &fakePairer{bound: &binding.Contact{ID: "contact-1"}},
+		Collector: &fakeCollector{},
+		Evaluator: &fakeEvaluator{},
+		Notifier:  &fakeNotifier{},
+		Sleeper:   &fakeSleeper{},
+	}
+	tests := []Config{
+		{MaxNotifyAttempts: -1},
+		{MaxPendingNotifications: -1},
 	}
 	for _, config := range tests {
 		if _, err := NewRunner(config, deps); err == nil {
@@ -297,6 +452,23 @@ func (s *fakeSleeper) Sleep(ctx context.Context, duration time.Duration) error {
 type fakeSignals struct {
 	done chan struct{}
 	once sync.Once
+}
+
+type fakeLogger struct {
+	events []LogEvent
+}
+
+func (l *fakeLogger) Log(_ context.Context, event LogEvent) {
+	l.events = append(l.events, event)
+}
+
+func (l *fakeLogger) has(name string) bool {
+	for _, event := range l.events {
+		if event.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func newFakeSignals() *fakeSignals {

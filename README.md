@@ -102,6 +102,16 @@ Startup order:
 
 Defaults are a `1m` polling interval, `1s` initial backoff, and `1m` maximum backoff. Negative durations are rejected. `NewOSSignalSource` adapts `SIGINT` and `SIGTERM` into the runtime signal source on Unix-like systems so shutdown cancels the loop cleanly.
 
+## Logging And Delivery Failures
+
+Runtime logging is structured JSON when `NewJSONLogger` is used. Logged lifecycle events include startup, account readiness, pairing, alert decisions, notification delivery failures, retries, queue-limit failures, sent notifications, and shutdown.
+
+Log fields with names that look like secrets, setup codes, provisioning URLs, message text, message bodies, errors, or causes are redacted. Runtime alert-decision logs include only safe metadata such as metric, target, kind, and severity, not raw message contents or bound contact IDs.
+
+Notification delivery uses bounded retries. Defaults are `3` notification attempts and at most `32` pending notification decisions per polling iteration. Account-readiness checks after a send failure are also bounded by the remaining delivery retry budget. If delivery is exhausted or the pending notification bound is exceeded, the runtime returns an operator-facing error with a next action and leaves useful local logs for diagnosis.
+
+Heartbeat messages are deferred for the MVP. The first version will send only alerts and recoveries.
+
 ## Non-Goals
 
 - Replacing full observability stacks such as Prometheus, Grafana, or agent-based SaaS platforms.
@@ -133,6 +143,7 @@ After binding, later messages from other contacts should not receive host alerts
 - The pairing code prevents a random first sender from taking over alert delivery during setup.
 - Alert messages can reveal hostnames, resource pressure, and operational state. The monitor should send them only to the persisted bound contact.
 - If Delta Chat delivery is unavailable, DeltaOps should log locally, retry with backoff, and avoid unbounded queues.
+- Heartbeat messages are deferred for the MVP to avoid notification noise before real alert behavior is proven.
 
 ## Development
 
@@ -159,4 +170,4 @@ mise exec -- go build -o bin/deltaops ./cmd/deltaops
 
 The local issue plan lives in `meta/issues.md`, with issue details in `meta/issues/`.
 
-The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, and runtime loop. The next open issue is structured logging and transport failure handling.
+The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, runtime loop, and structured transport-failure logging. The next open issue is packaging the CLI as a portable binary.
