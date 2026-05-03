@@ -23,3 +23,12 @@ Define the first-run Delta Chat account setup flow honestly, including whether a
 
 - Depends on the Delta Chat integration spike.
 - Keep the UX low setup, but do not pretend email account creation is provider-neutral.
+
+## Resolution
+
+- Decision recorded in `../decisions/0002-account-provisioning.md`.
+- MVP supports explicit operator-provided chatmail `dcaccount:` URLs only.
+- Input precedence is CLI flag `--dcaccount-url`, then environment variable `DELTAOPS_DCACCOUNT_URL`, then config key `delta_chat.dcaccount_url`.
+- Generic provider signup, existing IMAP/SMTP credentials, and OAuth setup are deferred until a concrete Delta Chat API path is implemented and tested.
+- After setup, DeltaOps should print the bot contact or secure-join URI, bot email address if available, and the local pairing code, but not the consumed provisioning URL.
+- Validation is implemented in `internal/config` and covered by fake input-source tests.
