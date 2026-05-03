@@ -22,3 +22,16 @@ Choose the initial operating system targets and the metric data sources before i
 ## Notes
 
 - Depends on the Delta Chat integration spike if that spike constrains build targets.
+
+## Resolution
+
+- Decision recorded in `../decisions/0004-mvp-platform-and-metrics.md`.
+- MVP collector target is Linux only.
+- Unsupported operating systems fail at runtime through `collector.NewPlan` and `collector.ValidatePlatform` with a clear Linux-only error before collector startup.
+- Default metric definitions are recorded in `internal/collector`:
+- `disk.used_percent`: `100 * (Blocks - Bfree) / Blocks` from `statfs`; unavailable when `Blocks == 0`.
+- `disk.inodes_used_percent`: `100 * (Files - Ffree) / Files` from `statfs`; unavailable when `Files == 0`.
+- `memory.pressure_percent`: `100 * (MemTotal - MemAvailable) / MemTotal` from `/proc/meminfo`; unavailable when `MemTotal == 0` or `MemAvailable` is missing.
+- `load.1m`: first field of `/proc/loadavg`; unavailable when the file is missing or unparsable.
+- CPU utilization is deferred; load average is the MVP CPU-pressure signal.
+- Cross-compilation must include the matching Linux Delta Chat RPC server helper, not just the Go binary.

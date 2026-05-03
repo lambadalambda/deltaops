@@ -6,17 +6,17 @@ Collect the initial system health metrics needed to detect disk exhaustion, high
 
 ## Requirements
 
-- Collect disk usage for configured filesystems or mount points.
-- Decide whether inode exhaustion is included for supported filesystems.
-- Collect memory usage in a way that reflects practical pressure, not just raw allocation.
-- Collect CPU utilization or load average if selected for the MVP metric set.
-- Follow the selected MVP operating systems and metric sources.
+- Collect `disk.used_percent` for configured Linux filesystems or mount points as `100 * (Blocks - Bfree) / Blocks` using `statfs`; return unavailable when `Blocks == 0`.
+- Collect `disk.inodes_used_percent` for configured Linux filesystems or mount points as `100 * (Files - Ffree) / Files` using `statfs`; return unavailable when `Files == 0`.
+- Collect `memory.pressure_percent` from Linux `/proc/meminfo` as `100 * (MemTotal - MemAvailable) / MemTotal`; return unavailable when `MemTotal == 0` or `MemAvailable` is missing.
+- Collect `load.1m` from the first field of Linux `/proc/loadavg`; return unavailable when the file is missing or unparsable.
+- Reject unsupported operating systems with the selected platform validation error.
 - Keep metric collection behind interfaces for deterministic tests.
 - Handle unavailable metrics with clear errors instead of panics.
 
 ## Acceptance Criteria
 
-- Tests cover parsing or collecting representative disk, memory, and selected load samples.
+- Tests cover parsing or collecting representative Linux disk, inode, memory, and load samples.
 - Tests cover unavailable metric sources.
 - The default check set includes disk and memory, plus load if selected for MVP.
 - The README documents the supported operating systems for the MVP.
