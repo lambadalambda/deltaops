@@ -27,3 +27,13 @@ Define how DeltaOps finds configuration, stores local state, and protects sensit
 
 - Keep the first config format minimal; defaults should run without a config file.
 - This issue should be completed before binding, metric collection, or runtime-loop work that needs persistent state.
+
+## Resolution
+
+- Decision recorded in `../decisions/0003-config-and-state-layout.md`.
+- Default config path is `$XDG_CONFIG_HOME/deltaops/config.yaml`, or `$HOME/.config/deltaops/config.yaml`.
+- Default state path is `$XDG_STATE_HOME/deltaops`, or `$HOME/.local/state/deltaops`, keeping state outside the repository by default.
+- Delta Chat account state lives under `<state>/deltachat-accounts`; contact binding lives at `<state>/binding.json`.
+- State directories are created with `0700` permissions and sensitive files with `0600` permissions where supported.
+- Plaintext local Delta Chat state is accepted for the MVP behind filesystem permissions; OS keyring storage is deferred and documented.
+- Path resolution, invalid config errors, and permission behavior are covered in `internal/config` tests.
