@@ -4,3 +4,4 @@
 - [x] [Implement pairing-code contact binding](issues/implement-first-contact-binding.md)
 - [x] [Select MVP operating systems and metric sources](issues/select-mvp-operating-systems-and-metric-sources.md)
 - [x] [Collect disk, memory, and load metrics](issues/collect-disk-and-memory-metrics.md)
+- [x] [Evaluate thresholds and alert state](issues/evaluate-thresholds-and-alert-state.md)

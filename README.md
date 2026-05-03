@@ -76,6 +76,19 @@ The `internal/collector` package implements these Linux samples behind fakeable 
 
 The platform and metric-source decision is recorded in `meta/decisions/0004-mvp-platform-and-metrics.md`.
 
+## Alert Defaults
+
+The `internal/alert` package evaluates samples with an injected clock, active alert state, recovery decisions, and a default `30m` repeat cooldown. The evaluator is safe for concurrent calls, but the runtime must still queue or retry emitted notification decisions when delivery fails.
+
+Default warning and critical thresholds:
+
+1. `disk.used_percent`: warning `85`, critical `95`.
+2. `disk.inodes_used_percent`: warning `85`, critical `95`.
+3. `memory.pressure_percent`: warning `80`, critical `90`.
+4. `load.1m`: warning `1`, critical `2`. These are conservative absolute-load defaults and should be configured for larger multi-core hosts.
+
+Alert and recovery messages include host, check, target, observed value, threshold, severity, and state.
+
 ## Non-Goals
 
 - Replacing full observability stacks such as Prometheus, Grafana, or agent-based SaaS platforms.
@@ -133,4 +146,4 @@ mise exec -- go build -o bin/deltaops ./cmd/deltaops
 
 The local issue plan lives in `meta/issues.md`, with issue details in `meta/issues/`.
 
-The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, and MVP metric-source decision. The next open issue is collecting disk, memory, and load metrics.
+The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, and alert-state evaluation. The next open issue is runtime loop and daemon lifecycle.
