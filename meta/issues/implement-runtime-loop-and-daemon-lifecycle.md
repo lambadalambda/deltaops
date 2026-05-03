@@ -22,3 +22,15 @@ Connect account setup, binding, metric collection, threshold evaluation, and not
 ## Notes
 
 - Depends on config/state, binding, metrics, alert-state, and Delta Chat transport decisions.
+
+## Resolution
+
+- Runtime orchestration is implemented in `internal/runtime` behind fakeable account, pairer, collector, evaluator, notifier, sleeper, and signal-source interfaces.
+- Startup waits for account readiness with bounded backoff, then uses an existing binding or waits for pairing before monitoring.
+- Defaults are `1m` polling interval, `1s` initial backoff, and `1m` max backoff.
+- Negative polling and backoff durations are rejected during runner construction.
+- The loop collects metrics, evaluates alert decisions, and sends non-noop decisions to the bound contact.
+- Notification failures trigger account readiness checks and bounded retry backoff until success or shutdown.
+- Context cancellation and signal-source cancellation exit gracefully.
+- `NewOSSignalSource` adapts `SIGINT` and `SIGTERM` on Unix-like systems; Windows currently adapts `os.Interrupt`.
+- Tests cover existing binding startup, waiting for pairing, multiple polling iterations without sleeping, signal shutdown, readiness backoff, notification retry backoff, and invalid duration validation.

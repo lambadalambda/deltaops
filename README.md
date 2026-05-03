@@ -89,6 +89,19 @@ Default warning and critical thresholds:
 
 Alert and recovery messages include host, check, target, observed value, threshold, severity, and state.
 
+## Runtime Loop
+
+The `internal/runtime` package wires account readiness, pairing, collection, alert evaluation, and notification delivery behind interfaces for deterministic tests.
+
+Startup order:
+
+1. Wait for account or transport readiness with bounded backoff.
+2. Use an existing bound contact, or wait for pairing when unbound.
+3. Run metric collection and alert evaluation on the configured polling interval.
+4. Send non-noop alert and recovery decisions to the bound contact.
+
+Defaults are a `1m` polling interval, `1s` initial backoff, and `1m` maximum backoff. Negative durations are rejected. `NewOSSignalSource` adapts `SIGINT` and `SIGTERM` into the runtime signal source on Unix-like systems so shutdown cancels the loop cleanly.
+
 ## Non-Goals
 
 - Replacing full observability stacks such as Prometheus, Grafana, or agent-based SaaS platforms.
@@ -146,4 +159,4 @@ mise exec -- go build -o bin/deltaops ./cmd/deltaops
 
 The local issue plan lives in `meta/issues.md`, with issue details in `meta/issues/`.
 
-The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, and alert-state evaluation. The next open issue is runtime loop and daemon lifecycle.
+The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, and runtime loop. The next open issue is structured logging and transport failure handling.

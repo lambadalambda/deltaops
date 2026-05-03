@@ -1,4 +1,3 @@
-- [ ] [Implement runtime loop and daemon lifecycle](issues/implement-runtime-loop-and-daemon-lifecycle.md)
 - [ ] [Implement structured logging and transport failure handling](issues/implement-structured-logging-and-transport-failure-handling.md)
 - [ ] [Package the CLI as a portable binary](issues/package-the-cli-as-a-portable-binary.md)
 - [ ] [Document operation, security, and hardening](issues/document-operation-and-hardening.md)
