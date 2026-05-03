@@ -1,16 +1,24 @@
 package cli
 
 import (
+	"context"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
+	"path/filepath"
 	pathruntime "runtime"
 	"strings"
 
+	"deltaops/internal/alert"
+	"deltaops/internal/binding"
 	"deltaops/internal/collector"
 	"deltaops/internal/config"
+	"deltaops/internal/notify"
+	"deltaops/internal/notify/dcrpc"
 	appruntime "deltaops/internal/runtime"
 )
 
@@ -20,14 +28,32 @@ const (
 )
 
 type Options struct {
-	Stdout io.Writer
-	Stderr io.Writer
-	Env    map[string]string
-	GOOS   string
+	Stdout         io.Writer
+	Stderr         io.Writer
+	Env            map[string]string
+	GOOS           string
+	GOARCH         string
+	RuntimeFactory RuntimeFactory
 
 	Version string
 	Commit  string
 }
+
+type RuntimeConfig struct {
+	Paths        config.Paths
+	Provisioning config.DeltaChatProvisioning
+	GOOS         string
+	GOARCH       string
+	Stdout       io.Writer
+	Stderr       io.Writer
+}
+
+type RuntimeProcess interface {
+	Run(context.Context) error
+	Close() error
+}
+
+type RuntimeFactory func(context.Context, RuntimeConfig) (RuntimeProcess, error)
 
 func Run(args []string, options Options) int {
 	options = options.withDefaults()
@@ -133,7 +159,23 @@ func runCommand(args []string, options Options) int {
 		})
 	}
 
-	return printStartupError(options.Stderr, missingRPCHelperError(options.GOOS))
+	runtimeConfig := RuntimeConfig{
+		Paths:        paths,
+		Provisioning: startup.Provisioning,
+		GOOS:         options.GOOS,
+		GOARCH:       options.GOARCH,
+		Stdout:       options.Stdout,
+		Stderr:       options.Stderr,
+	}
+	process, err := options.RuntimeFactory(context.Background(), runtimeConfig)
+	if err != nil {
+		return printStartupError(options.Stderr, operatorErrorOrDefault(err, "cannot start DeltaOps runtime", "check Delta Chat helper packaging, account state, and local logs"))
+	}
+	defer process.Close() //nolint:errcheck
+	if err := process.Run(context.Background()); err != nil {
+		return printStartupError(options.Stderr, operatorErrorOrDefault(err, "DeltaOps runtime stopped with an error", "check Delta Chat account state, host metrics, and local logs"))
+	}
+	return exitOK
 }
 
 func versionCommand(args []string, options Options) int {
@@ -151,15 +193,127 @@ func versionCommand(args []string, options Options) int {
 	return exitOK
 }
 
-func missingRPCHelperError(goos string) *appruntime.OperatorError {
+func missingRPCHelperError(goos, goarch string) *appruntime.OperatorError {
 	return &appruntime.OperatorError{
 		Message: "Delta Chat RPC helper is not packaged in this build",
 		NextAction: fmt.Sprintf(
 			"build a %s/%s release with an embedded deltachat-rpc-server asset before running the monitor",
 			goos,
-			pathruntime.GOARCH,
+			goarch,
 		),
 	}
+}
+
+func defaultRuntimeFactory(ctx context.Context, runtimeConfig RuntimeConfig) (RuntimeProcess, error) {
+	transport, err := dcrpc.Open(ctx, dcrpc.Options{
+		GOOS:         runtimeConfig.GOOS,
+		GOARCH:       runtimeConfig.GOARCH,
+		AccountsDir:  runtimeConfig.Paths.DeltaChatAccountsDir,
+		HelperDir:    filepath.Join(runtimeConfig.Paths.StateDir, "deltachat-rpc-helper"),
+		DCAccountURL: runtimeConfig.Provisioning.DCAccountURL,
+		Stderr:       io.Discard,
+		Assets:       dcrpc.EmbeddedHelpers(),
+	})
+	if err != nil {
+		if errors.Is(err, dcrpc.ErrUnsupportedHelperTarget) {
+			return nil, &appruntime.OperatorError{
+				Message:    "Delta Chat RPC helper target is unsupported",
+				NextAction: "run a supported linux/amd64, linux/arm64, or linux/386 build, or add a reviewed helper mapping for this target",
+				Cause:      err,
+			}
+		}
+		if errors.Is(err, dcrpc.ErrHelperUnavailable) {
+			return nil, missingRPCHelperError(runtimeConfig.GOOS, runtimeConfig.GOARCH)
+		}
+		return nil, &appruntime.OperatorError{Message: "cannot start Delta Chat transport", NextAction: "check Delta Chat helper packaging and local account state", Cause: err}
+	}
+	process, err := newRuntimeProcess(ctx, runtimeConfig, transport)
+	if err != nil {
+		_ = transport.Close()
+		return nil, err
+	}
+	return process, nil
+}
+
+func newRuntimeProcess(ctx context.Context, runtimeConfig RuntimeConfig, transport *dcrpc.Transport) (RuntimeProcess, error) {
+	setupCode, err := newSetupCode()
+	if err != nil {
+		return nil, &appruntime.OperatorError{Message: "cannot create pairing setup code", NextAction: "retry startup and check local randomness sources", Cause: err}
+	}
+	manager, err := binding.NewManager(setupCode, binding.NewFileStore(runtimeConfig.Paths.BindingPath))
+	if err != nil {
+		return nil, &appruntime.OperatorError{Message: "cannot load contact binding", NextAction: "inspect or reset the binding file in the DeltaOps state directory", Cause: err}
+	}
+	if _, ok := manager.BoundContact(); !ok {
+		account, err := transport.Account(ctx)
+		if err != nil {
+			return nil, &appruntime.OperatorError{Message: "cannot read Delta Chat account contact data", NextAction: "check Delta Chat account setup and local state", Cause: err}
+		}
+		printPairingSetup(runtimeConfig.Stdout, account, setupCode)
+	}
+
+	collector, err := collector.NewCollector(runtimeConfig.GOOS, collector.Dependencies{}, nil)
+	if err != nil {
+		return nil, &appruntime.OperatorError{Message: "cannot create host metric collector", NextAction: "run DeltaOps on a supported Linux host", Cause: err}
+	}
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		host = "unknown"
+	}
+	signals := appruntime.NewOSSignalSource()
+	runner, err := appruntime.NewRunner(appruntime.Config{}, appruntime.Dependencies{
+		Account:   notify.RuntimeAccount{Transport: transport},
+		Pairer:    notify.RuntimePairer{Manager: manager, Transport: transport},
+		Collector: collector,
+		Evaluator: alert.NewEvaluator(alert.DefaultConfig(host), nil),
+		Notifier:  notify.RuntimeNotifier{Transport: transport},
+		Signals:   signals,
+		Logger:    appruntime.NewJSONLogger(runtimeConfig.Stderr),
+	})
+	if err != nil {
+		signals.Stop()
+		return nil, &appruntime.OperatorError{Message: "cannot create DeltaOps runtime", NextAction: "check runtime configuration and local logs", Cause: err}
+	}
+	return &runtimeProcess{runner: runner, transport: transport, signals: signals}, nil
+}
+
+type runtimeProcess struct {
+	runner    *appruntime.Runner
+	transport *dcrpc.Transport
+	signals   *appruntime.OSSignalSource
+}
+
+func (p *runtimeProcess) Run(ctx context.Context) error {
+	return p.runner.Run(ctx)
+}
+
+func (p *runtimeProcess) Close() error {
+	if p.signals != nil {
+		p.signals.Stop()
+	}
+	if p.transport != nil {
+		return p.transport.Close()
+	}
+	return nil
+}
+
+func newSetupCode() (string, error) {
+	value, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%06d", value.Int64()), nil
+}
+
+func printPairingSetup(w io.Writer, account notify.Account, setupCode string) {
+	fmt.Fprintln(w, "DeltaOps pairing setup")
+	if strings.TrimSpace(account.ContactURI) != "" {
+		fmt.Fprintf(w, "bot contact: %s\n", account.ContactURI)
+	}
+	if strings.TrimSpace(account.Address) != "" {
+		fmt.Fprintf(w, "bot address: %s\n", account.Address)
+	}
+	fmt.Fprintf(w, "setup code: %s\n", setupCode)
 }
 
 func readConfigDCAccountURL(path string, explicit bool) (string, error) {
@@ -282,6 +436,14 @@ func printStartupError(w io.Writer, err error) int {
 	return exitStartup
 }
 
+func operatorErrorOrDefault(err error, message, nextAction string) error {
+	var operatorErr *appruntime.OperatorError
+	if errors.As(err, &operatorErr) {
+		return operatorErr
+	}
+	return &appruntime.OperatorError{Message: message, NextAction: nextAction, Cause: err}
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: deltaops [run|version]")
 	fmt.Fprintln(w, "commands:")
@@ -302,6 +464,12 @@ func (options Options) withDefaults() Options {
 	}
 	if options.GOOS == "" {
 		options.GOOS = pathruntime.GOOS
+	}
+	if options.GOARCH == "" {
+		options.GOARCH = pathruntime.GOARCH
+	}
+	if options.RuntimeFactory == nil {
+		options.RuntimeFactory = defaultRuntimeFactory
 	}
 	if options.Version == "" {
 		options.Version = "dev"

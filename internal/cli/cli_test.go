@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,6 +71,54 @@ func TestRunUsesFlagBeforeEnvAndDoesNotLeakProvisioningURLs(t *testing.T) {
 	}
 }
 
+func TestRunStartsRuntimeWithResolvedInputs(t *testing.T) {
+	var out, errOut bytes.Buffer
+	var got RuntimeConfig
+	process := &fakeRuntimeProcess{}
+	options := testOptions(t, "linux", map[string]string{"DELTAOPS_DCACCOUNT_URL": "dcaccount:env-secret"}, &out, &errOut)
+	options.RuntimeFactory = func(_ context.Context, config RuntimeConfig) (RuntimeProcess, error) {
+		got = config
+		return process, nil
+	}
+
+	exit := Run([]string{"run"}, options)
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", exit, errOut.String())
+	}
+	if !process.ran || !process.closed {
+		t.Fatalf("process ran/closed = %v/%v, want true/true", process.ran, process.closed)
+	}
+	if got.Provisioning.DCAccountURL != "dcaccount:env-secret" {
+		t.Fatalf("provisioning URL = %q", got.Provisioning.DCAccountURL)
+	}
+	if got.Paths.StateDir == "" || got.Paths.DeltaChatAccountsDir == "" || got.Stdout == nil || got.Stderr == nil {
+		t.Fatalf("runtime config missing resolved fields: %#v", got)
+	}
+	if strings.Contains(out.String()+errOut.String(), "dcaccount:env-secret") {
+		t.Fatalf("output leaked provisioning URL: stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestRunReportsRuntimeFactoryErrorsWithoutLeakingProvisioningURL(t *testing.T) {
+	var out, errOut bytes.Buffer
+	options := testOptions(t, "linux", nil, &out, &errOut)
+	options.RuntimeFactory = func(context.Context, RuntimeConfig) (RuntimeProcess, error) {
+		return nil, errRuntimeFactorySecret{}
+	}
+
+	exit := Run([]string{"run", "--dcaccount-url", "dcaccount:flag-secret"}, options)
+	if exit != 2 {
+		t.Fatalf("exit = %d, want 2", exit)
+	}
+	combined := out.String() + errOut.String()
+	if strings.Contains(combined, "dcaccount:flag-secret") || strings.Contains(combined, "token=abc") {
+		t.Fatalf("output leaked runtime factory secret in %q", combined)
+	}
+	if !strings.Contains(errOut.String(), "next action") {
+		t.Fatalf("stderr %q does not include next action", errOut.String())
+	}
+}
+
 func TestRunDoesNotLeakPositionalProvisioningURL(t *testing.T) {
 	tests := [][]string{
 		{"dcaccount:command-secret"},
@@ -112,11 +161,12 @@ func TestRunWithFlagAndStateDirDoesNotRequireHomeForConfigPath(t *testing.T) {
 	var out, errOut bytes.Buffer
 	stateDir := filepath.Join(t.TempDir(), "state")
 	exit := Run([]string{"run", "--state-dir", stateDir, "--dcaccount-url", "dcaccount:flag-secret"}, Options{
-		Stdout:  &out,
-		Stderr:  &errOut,
-		Env:     map[string]string{},
-		GOOS:    "linux",
-		Version: "dev",
+		Stdout:         &out,
+		Stderr:         &errOut,
+		Env:            map[string]string{},
+		GOOS:           "linux",
+		Version:        "dev",
+		RuntimeFactory: missingHelperRuntimeFactory,
 	})
 
 	if exit != 2 {
@@ -202,6 +252,27 @@ func TestRunRejectsUnsupportedPlatformBeforeProvisioning(t *testing.T) {
 	}
 }
 
+func TestDefaultRuntimeFactoryRejectsUnsupportedHelperTarget(t *testing.T) {
+	var out, errOut bytes.Buffer
+	options := testOptions(t, "linux", nil, &out, &errOut)
+	options.GOARCH = "riscv64"
+	options.RuntimeFactory = defaultRuntimeFactory
+
+	exit := Run([]string{"run", "--dcaccount-url", "dcaccount:secret"}, options)
+	if exit != 2 {
+		t.Fatalf("exit = %d, want 2", exit)
+	}
+	message := errOut.String()
+	for _, want := range []string{"helper target is unsupported", "linux/amd64", "next action"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("stderr %q does not include %q", message, want)
+		}
+	}
+	if strings.Contains(message, "dcaccount:secret") {
+		t.Fatalf("stderr %q leaked provisioning URL", message)
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
 	exit := Run([]string{"wat"}, Options{Stdout: &out, Stderr: &errOut})
@@ -223,5 +294,30 @@ func testOptions(t *testing.T, goos string, env map[string]string, out, errOut *
 	for key, value := range env {
 		merged[key] = value
 	}
-	return Options{Stdout: out, Stderr: errOut, Env: merged, GOOS: goos, Version: "dev"}
+	return Options{Stdout: out, Stderr: errOut, Env: merged, GOOS: goos, Version: "dev", RuntimeFactory: missingHelperRuntimeFactory}
+}
+
+func missingHelperRuntimeFactory(_ context.Context, config RuntimeConfig) (RuntimeProcess, error) {
+	return nil, missingRPCHelperError(config.GOOS, config.GOARCH)
+}
+
+type fakeRuntimeProcess struct {
+	ran    bool
+	closed bool
+}
+
+func (p *fakeRuntimeProcess) Run(context.Context) error {
+	p.ran = true
+	return nil
+}
+
+func (p *fakeRuntimeProcess) Close() error {
+	p.closed = true
+	return nil
+}
+
+type errRuntimeFactorySecret struct{}
+
+func (errRuntimeFactorySecret) Error() string {
+	return "setup failed dcaccount:flag-secret token=abc"
 }

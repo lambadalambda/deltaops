@@ -2,7 +2,7 @@
 
 DeltaOps is planned as a small Go system monitor that sends alerts through Delta Chat. The target deployment model is one portable `deltaops` binary that can be copied onto a host, run with minimal setup, and paired by messaging the bot from the operator's Delta Chat account.
 
-Status: Delta Chat integration, account provisioning, state layout, pairing logic, MVP metric-source decisions, and the CLI entrypoint are in place. Live Delta Chat transport still requires packaging an embedded RPC helper.
+Status: Delta Chat integration, account provisioning, state layout, pairing logic, MVP metric-source decisions, the CLI entrypoint, and live Delta Chat transport wiring are in place. Release binaries still require an embedded RPC helper asset to run on Linux.
 
 ## Goals
 
@@ -16,7 +16,7 @@ Status: Delta Chat integration, account provisioning, state layout, pairing logi
 
 ## Quickstart
 
-This is the intended operator flow for a Linux release build that embeds the matching `deltachat-rpc-server` helper. The current development binary validates startup and then exits with a next action until that helper is packaged.
+This is the intended operator flow for a Linux release build that embeds the matching `deltachat-rpc-server` helper. The current source tree does not commit helper binaries, so development builds validate startup and then exit with a next action until a release asset is added.
 
 1. Install the `deltaops` binary on the monitored Linux host, for example at `/usr/local/bin/deltaops`.
 2. Create a private state directory, for example `/var/lib/deltaops`, owned by the service user and mode `0700`.
@@ -41,6 +41,8 @@ Avoid passing provisioning URLs directly in shell history on shared hosts. Prefe
 - Release builds should keep the operator experience to one copied `deltaops` file by embedding the matching platform-specific RPC server helper and extracting it at runtime.
 - This is not a pure-Go binary internally. Each supported OS and architecture needs a matching Delta Chat RPC server asset.
 - The MVP-supported account setup path is explicit operator input via a chatmail `dcaccount:` URL. Provider-neutral email account auto-registration is out of scope unless a provider offers a documented automation flow.
+- The `internal/notify/dcrpc` package opens the embedded helper with `DC_ACCOUNTS_PATH` set to `<state>/deltachat-accounts`, creates or reuses one Delta Chat account, configures bot mode from the `dcaccount:` URL when needed, receives pairing messages, and sends alert text to the persisted contact ID.
+- Default tests use fakes for the RPC boundary. Live provider-dependent tests must stay behind explicit integration controls.
 - The full decision is recorded in `meta/decisions/0001-delta-chat-integration.md`.
 
 ## Account Provisioning
@@ -68,7 +70,8 @@ Default paths, using absolute XDG locations only:
 1. Config file: `$XDG_CONFIG_HOME/deltaops/config.yaml`, or `$HOME/.config/deltaops/config.yaml` when `XDG_CONFIG_HOME` is unset.
 2. State directory: `$XDG_STATE_HOME/deltaops`, or `$HOME/.local/state/deltaops` when `XDG_STATE_HOME` is unset.
 3. Delta Chat accounts: `<state>/deltachat-accounts`.
-4. Bound contact: `<state>/binding.json`.
+4. Extracted Delta Chat RPC helper: `<state>/deltachat-rpc-helper`.
+5. Bound contact: `<state>/binding.json`.
 
 The CLI supports `--config` and `--state-dir` overrides. State directories are created with `0700` permissions and sensitive files with `0600` permissions on POSIX-style filesystems where supported.
 
@@ -151,9 +154,17 @@ Build the current CLI binary with:
 mise exec -- go build -o bin/deltaops ./cmd/deltaops
 ```
 
-The current binary does not yet embed `deltachat-rpc-server`. On Linux, a valid `run` prepares the state layout and then exits with a clear next action explaining that a release must be built with the matching Delta Chat RPC helper asset. This preserves the one-file operator target while keeping the missing runtime dependency explicit.
+The source tree does not commit upstream `deltachat-rpc-server` binaries. On Linux, a valid development `run` prepares the state layout and then exits with a clear next action explaining that a release must be built with the matching Delta Chat RPC helper asset. This preserves the one-file operator target while keeping the missing runtime dependency explicit.
 
 The MVP runtime platform is Linux. Non-Linux builds can compile developer commands such as `version`, but `run` rejects non-Linux operating systems before collector startup. Cross-compilation requires more than setting `GOOS` and `GOARCH`: each supported Linux architecture release must embed the corresponding upstream `deltachat-rpc-server` artifact built for that target.
+
+For `github.com/chatmail/rpc-client-go/v2` v2.49.0, the currently recognized helper asset names are:
+
+1. `deltachat-rpc-server-x86_64-linux` for `linux/amd64`.
+2. `deltachat-rpc-server-aarch64-linux` for `linux/arm64`.
+3. `deltachat-rpc-server-i686-linux` for `linux/386`.
+
+Place the selected helper under `internal/notify/dcrpc/assets/` before building a release. The helper is embedded into `deltaops`, extracted at runtime to `<state>/deltachat-rpc-helper` with executable `0700` permissions, and launched as a managed subprocess. Do not commit helper binaries until a release-asset policy is reviewed, because they are large upstream artifacts.
 
 ## Linux Service Example
 
@@ -263,4 +274,4 @@ mise exec -- go build -o bin/deltaops ./cmd/deltaops
 
 The local issue plan lives in `meta/issues.md`, with issue details in `meta/issues/`.
 
-The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, runtime loop, structured transport-failure logging, CLI packaging behavior, and operation/security documentation.
+The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, runtime loop, structured transport-failure logging, CLI packaging behavior, operation/security documentation, and live Delta Chat transport wiring.
