@@ -72,6 +72,8 @@ Default metrics planned for the MVP:
 
 CPU utilization is deferred for the MVP; load average is the initial CPU-pressure signal. Linux release builds must include matching embedded Delta Chat RPC server assets for their target architecture.
 
+The `internal/collector` package implements these Linux samples behind fakeable filesystem and `/proc` interfaces. Unavailable metric sources return clear unavailable errors instead of panics.
+
 The platform and metric-source decision is recorded in `meta/decisions/0004-mvp-platform-and-metrics.md`.
 
 ## Non-Goals

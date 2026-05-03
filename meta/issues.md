@@ -1,4 +1,3 @@
-- [ ] [Collect disk, memory, and load metrics](issues/collect-disk-and-memory-metrics.md)
 - [ ] [Evaluate thresholds and alert state](issues/evaluate-thresholds-and-alert-state.md)
 - [ ] [Implement runtime loop and daemon lifecycle](issues/implement-runtime-loop-and-daemon-lifecycle.md)
 - [ ] [Implement structured logging and transport failure handling](issues/implement-structured-logging-and-transport-failure-handling.md)

@@ -25,3 +25,13 @@ Collect the initial system health metrics needed to detect disk exhaustion, high
 
 - Avoid broad platform promises until the metric source is selected and tested.
 - Depends on the MVP operating-system and metric-source decision.
+
+## Resolution
+
+- Linux metric collection is implemented in `internal/collector` behind fakeable `FileSystems` and `ProcReader` interfaces.
+- `Collector.Collect` gathers default disk byte usage, inode usage, memory pressure, and 1-minute load samples.
+- Unsupported operating systems are rejected through `NewCollector` and the selected platform plan validation.
+- Disk and inode usage are calculated from `statfs`; zero totals return `UnavailableError`.
+- Memory pressure is parsed from `/proc/meminfo`; missing or invalid `MemTotal` and `MemAvailable` return `UnavailableError`.
+- Load is parsed from the first field of `/proc/loadavg`; missing or unparsable input returns `UnavailableError`.
+- Tests cover representative fake disk, inode, memory, and load samples plus unavailable sources.

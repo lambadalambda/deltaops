@@ -3,3 +3,4 @@
 - [x] [Implement configuration and state layout](issues/implement-configuration-and-state-layout.md)
 - [x] [Implement pairing-code contact binding](issues/implement-first-contact-binding.md)
 - [x] [Select MVP operating systems and metric sources](issues/select-mvp-operating-systems-and-metric-sources.md)
+- [x] [Collect disk, memory, and load metrics](issues/collect-disk-and-memory-metrics.md)
