@@ -14,6 +14,27 @@ Status: Delta Chat integration, account provisioning, state layout, pairing logi
 - Alert on practical host-health failures such as disk exhaustion, high memory pressure, and other checks selected for the MVP.
 - Prefer safe defaults, clear recovery messages, and low alert noise.
 
+## Quickstart
+
+This is the intended operator flow for a Linux release build that embeds the matching `deltachat-rpc-server` helper. The current development binary validates startup and then exits with a next action until that helper is packaged.
+
+1. Install the `deltaops` binary on the monitored Linux host, for example at `/usr/local/bin/deltaops`.
+2. Create a private state directory, for example `/var/lib/deltaops`, owned by the service user and mode `0700`.
+3. Provide the chatmail provisioning URL with `--dcaccount-url`, `DELTAOPS_DCACCOUNT_URL`, or `delta_chat.dcaccount_url` in the config file.
+4. Start `deltaops run --state-dir /var/lib/deltaops`.
+5. Read the startup output for the bot contact data and one-time pairing code.
+6. Send the pairing code to the bot from the Delta Chat account that should receive alerts.
+7. Leave the process running under a service manager; runtime lifecycle logs are structured JSON when the packaged runtime is active, while startup and operator errors are plain text.
+
+Minimal config file shape:
+
+```yaml
+delta_chat:
+  dcaccount_url: dcaccount:...
+```
+
+Avoid passing provisioning URLs directly in shell history on shared hosts. Prefer a private config file or service environment file with mode `0600`.
+
 ## Delta Chat Integration
 
 - DeltaOps will use `github.com/chatmail/rpc-client-go/v2` and a managed `deltachat-rpc-server` subprocess for the MVP path.
@@ -32,6 +53,8 @@ The MVP setup input is a chatmail `dcaccount:` URL. DeltaOps will accept it from
 
 If none is provided, startup should fail with a next action telling the operator to provide one of those inputs. Existing IMAP/SMTP credentials and OAuth setup are deferred, not fallback behavior for the MVP.
 
+The MVP treats the provisioning URL as startup input. Keep it available for restarts until the live Delta Chat account setup path proves that the URL can be safely removed after first configuration.
+
 After account setup, DeltaOps should print the bot Delta Chat contact or secure-join URI, the bot email address if available, and the local pairing code. It should not print the consumed `dcaccount:` URL.
 
 The provisioning decision is recorded in `meta/decisions/0002-account-provisioning.md`.
@@ -47,7 +70,7 @@ Default paths, using absolute XDG locations only:
 3. Delta Chat accounts: `<state>/deltachat-accounts`.
 4. Bound contact: `<state>/binding.json`.
 
-State paths should be overrideable by future CLI/config wiring. State directories are created with `0700` permissions and sensitive files with `0600` permissions on POSIX-style filesystems where supported.
+The CLI supports `--config` and `--state-dir` overrides. State directories are created with `0700` permissions and sensitive files with `0600` permissions on POSIX-style filesystems where supported.
 
 MVP warning: local Delta Chat state is accepted as plaintext on disk behind filesystem permissions. That state can include account credentials, message databases, and contact binding data. Protect and back up the state directory accordingly.
 
@@ -132,12 +155,60 @@ The current binary does not yet embed `deltachat-rpc-server`. On Linux, a valid 
 
 The MVP runtime platform is Linux. Non-Linux builds can compile developer commands such as `version`, but `run` rejects non-Linux operating systems before collector startup. Cross-compilation requires more than setting `GOOS` and `GOARCH`: each supported Linux architecture release must embed the corresponding upstream `deltachat-rpc-server` artifact built for that target.
 
+## Linux Service Example
+
+Use a dedicated service user and a private environment file rather than putting secrets in the unit. Example `/etc/deltaops/deltaops.env`:
+
+```sh
+DELTAOPS_DCACCOUNT_URL=dcaccount:...
+```
+
+Restrict it with mode `0600`. Example systemd unit:
+
+```ini
+[Unit]
+Description=DeltaOps host monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deltaops
+Group=deltaops
+EnvironmentFile=/etc/deltaops/deltaops.env
+ExecStart=/usr/local/bin/deltaops run --state-dir /var/lib/deltaops
+Restart=on-failure
+RestartSec=30s
+StateDirectory=deltaops
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/deltaops
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`SIGINT` and `SIGTERM` cancel the runtime loop cleanly. Runtime signal-source tests cover this cancellation path; an end-to-end systemd stop check should be repeated once the packaged Delta Chat runtime is available.
+
+## Operations
+
+Reset pairing by stopping DeltaOps, deleting `<state>/binding.json`, and starting DeltaOps again with a fresh setup code. Do not delete the whole state directory for a contact reset unless the Delta Chat account should also be reprovisioned.
+
+Back up the state directory only to encrypted storage. Stop DeltaOps before file-level backups so Delta Chat account databases and binding files are consistent. Restore the directory with the original owner and restrictive permissions before restarting the service.
+
+Rotate the Delta Chat bot account by stopping DeltaOps, backing up or deleting the existing state directory, provisioning a new `dcaccount:` URL, and pairing the new bot contact. Rotate the alert recipient by deleting only `binding.json` and pairing a new contact.
+
+Log rotation is handled by the service manager when stdout and stderr go to journald. If logs are redirected to files, use normal Linux log rotation and restrict file permissions because alert metadata can reveal operational state.
+
 ## Non-Goals
 
 - Replacing full observability stacks such as Prometheus, Grafana, or agent-based SaaS platforms.
 - Supporting many notification transports.
 - Managing multiple operators in the first version.
-- Shipping a daemon supervisor. Service manager examples can be documented later.
+- Shipping a daemon supervisor.
 
 ## Intended UX
 
@@ -160,9 +231,11 @@ After binding, later messages from other contacts should not receive host alerts
 
 - Local state may contain Delta Chat account credentials, message databases, and the bound contact. It must be stored outside the repository with restrictive permissions.
 - The MVP accepts plaintext local state protected by filesystem permissions; OS keyring integration is deferred.
-- The pairing code prevents a random first sender from taking over alert delivery during setup.
-- Alert messages can reveal hostnames, resource pressure, and operational state. The monitor should send them only to the persisted bound contact.
-- If Delta Chat delivery is unavailable, DeltaOps should log locally, retry with backoff, and avoid unbounded queues.
+- Treat `dcaccount:` URLs as credentials. Do not commit them, place them in world-readable unit files, or pass them through shared shell history.
+- The pairing code prevents a random first sender from taking over alert delivery during setup. Anyone who can read startup output during the unbound window can pair the monitor.
+- Alert messages can reveal hostnames, resource pressure, filesystem targets, thresholds, and recovery state. The monitor should send them only to the persisted bound contact.
+- Runtime logs redact fields that look like provisioning URLs, setup codes, message text, message bodies, errors, or causes. Normal lifecycle logs keep safe metadata such as metric, target, kind, and severity.
+- If Delta Chat delivery is unavailable, DeltaOps logs locally, retries with backoff, and avoids unbounded queues.
 - Heartbeat messages are deferred for the MVP to avoid notification noise before real alert behavior is proven.
 
 ## Development
@@ -190,4 +263,4 @@ mise exec -- go build -o bin/deltaops ./cmd/deltaops
 
 The local issue plan lives in `meta/issues.md`, with issue details in `meta/issues/`.
 
-The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, runtime loop, structured transport-failure logging, and CLI packaging behavior. The remaining open issue is documenting operation, security, and hardening.
+The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, runtime loop, structured transport-failure logging, CLI packaging behavior, and operation/security documentation.

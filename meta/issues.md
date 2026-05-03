@@ -1,1 +1,0 @@
-- [ ] [Document operation, security, and hardening](issues/document-operation-and-hardening.md)
