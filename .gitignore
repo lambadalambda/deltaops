@@ -1,0 +1,12 @@
+/.env
+/.env.*
+/.mise.local.toml
+/bin/
+/dist/
+/deltaops
+/.deltaops/
+/deltaops-state/
+/dc-data/
+*.out
+*.test
+.DS_Store
