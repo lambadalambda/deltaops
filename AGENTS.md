@@ -9,7 +9,7 @@ Guidance for AI agents and contributors working in this repository.
 - Delivery shape: one portable `deltaops` binary.
 - Notification transport: Delta Chat only.
 - Process: test-driven development using red, green, refactor.
-- Commits: small, topical commits only.
+- Commits: small, topical commits only; after a reviewed slice has no blocking findings, commit it without asking again.
 - Reviews: after each finished feature, request a review from one of the code reviewer subagents before committing.
 - Planning: track work in repository-local issues under `meta/` using the repo-issues workflow.
 

@@ -31,21 +31,24 @@ type StartupConfig struct {
 }
 
 func ResolvePaths(env PathEnv, overrides PathOverrides) (Paths, error) {
-	configPath, err := resolveConfigPath(env, overrides.ConfigPath)
+	configPath, err := ResolveConfigPath(env, overrides.ConfigPath)
 	if err != nil {
 		return Paths{}, err
 	}
-	stateDir, err := resolveStateDir(env, overrides.StateDir)
+	stateDir, err := ResolveStateDir(env, overrides.StateDir)
 	if err != nil {
 		return Paths{}, err
 	}
+	return NewPaths(configPath, stateDir), nil
+}
 
+func NewPaths(configPath, stateDir string) Paths {
 	return Paths{
 		ConfigPath:           configPath,
 		StateDir:             stateDir,
 		DeltaChatAccountsDir: filepath.Join(stateDir, "deltachat-accounts"),
 		BindingPath:          filepath.Join(stateDir, "binding.json"),
-	}, nil
+	}
 }
 
 func (c StartupConfig) Validate() error {
@@ -110,7 +113,7 @@ func WriteSensitiveFile(path string, data []byte) error {
 	return nil
 }
 
-func resolveConfigPath(env PathEnv, override string) (string, error) {
+func ResolveConfigPath(env PathEnv, override string) (string, error) {
 	if path := strings.TrimSpace(override); path != "" {
 		return filepath.Clean(path), nil
 	}
@@ -121,7 +124,7 @@ func resolveConfigPath(env PathEnv, override string) (string, error) {
 	return filepath.Join(base, "deltaops", "config.yaml"), nil
 }
 
-func resolveStateDir(env PathEnv, override string) (string, error) {
+func ResolveStateDir(env PathEnv, override string) (string, error) {
 	if dir := strings.TrimSpace(override); dir != "" {
 		return filepath.Clean(dir), nil
 	}

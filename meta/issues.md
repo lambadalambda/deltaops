@@ -1,2 +1,1 @@
-- [ ] [Package the CLI as a portable binary](issues/package-the-cli-as-a-portable-binary.md)
 - [ ] [Document operation, security, and hardening](issues/document-operation-and-hardening.md)

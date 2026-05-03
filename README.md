@@ -2,7 +2,7 @@
 
 DeltaOps is planned as a small Go system monitor that sends alerts through Delta Chat. The target deployment model is one portable `deltaops` binary that can be copied onto a host, run with minimal setup, and paired by messaging the bot from the operator's Delta Chat account.
 
-Status: Delta Chat integration, account provisioning, state layout, pairing logic, and MVP metric-source decisions are in place. The monitor is not runnable yet.
+Status: Delta Chat integration, account provisioning, state layout, pairing logic, MVP metric-source decisions, and the CLI entrypoint are in place. Live Delta Chat transport still requires packaging an embedded RPC helper.
 
 ## Goals
 
@@ -112,6 +112,26 @@ Notification delivery uses bounded retries. Defaults are `3` notification attemp
 
 Heartbeat messages are deferred for the MVP. The first version will send only alerts and recoveries.
 
+## CLI And Packaging
+
+Commands:
+
+1. `deltaops` or `deltaops run`: start with safe defaults, validate startup inputs, and prepare state.
+2. `deltaops version`: print version metadata.
+3. `deltaops run --help`: print supported startup flags.
+
+Startup accepts the chatmail provisioning URL from `--dcaccount-url`, `DELTAOPS_DCACCOUNT_URL`, or `delta_chat.dcaccount_url` in the config file. The CLI also supports `--config` and `--state-dir` overrides. The config reader intentionally supports only the current minimal key shape needed by the MVP, not arbitrary YAML configuration.
+
+Build the current CLI binary with:
+
+```sh
+mise exec -- go build -o bin/deltaops ./cmd/deltaops
+```
+
+The current binary does not yet embed `deltachat-rpc-server`. On Linux, a valid `run` prepares the state layout and then exits with a clear next action explaining that a release must be built with the matching Delta Chat RPC helper asset. This preserves the one-file operator target while keeping the missing runtime dependency explicit.
+
+The MVP runtime platform is Linux. Non-Linux builds can compile developer commands such as `version`, but `run` rejects non-Linux operating systems before collector startup. Cross-compilation requires more than setting `GOOS` and `GOARCH`: each supported Linux architecture release must embed the corresponding upstream `deltachat-rpc-server` artifact built for that target.
+
 ## Non-Goals
 
 - Replacing full observability stacks such as Prometheus, Grafana, or agent-based SaaS platforms.
@@ -160,7 +180,7 @@ If `mise` reports that `.mise.toml` is not trusted, review the file and run:
 mise trust .mise.toml
 ```
 
-Build command once the CLI exists:
+Build command:
 
 ```sh
 mise exec -- go build -o bin/deltaops ./cmd/deltaops
@@ -170,4 +190,4 @@ mise exec -- go build -o bin/deltaops ./cmd/deltaops
 
 The local issue plan lives in `meta/issues.md`, with issue details in `meta/issues/`.
 
-The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, runtime loop, and structured transport-failure logging. The next open issue is packaging the CLI as a portable binary.
+The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, runtime loop, structured transport-failure logging, and CLI packaging behavior. The remaining open issue is documenting operation, security, and hardening.
