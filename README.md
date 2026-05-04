@@ -2,7 +2,7 @@
 
 DeltaOps is planned as a small Go system monitor that sends alerts through Delta Chat. The target deployment model is one portable `deltaops` binary that can be copied onto a host, run with minimal setup, and paired by messaging the bot from the operator's Delta Chat account.
 
-Status: Delta Chat integration, account provisioning, state layout, pairing logic, MVP metric-source decisions, the CLI entrypoint, live Delta Chat transport wiring, and macOS development support are in place. Release binaries still require prepared embedded RPC helper assets before they can run the live transport.
+Status: Delta Chat integration, provider URL provisioning, state layout, pairing logic, MVP metric-source decisions, the CLI entrypoint, live Delta Chat transport wiring, pairing/startup status reports, macOS development support, and a Docker embedded-helper smoke harness are in place. Release binaries still require prepared embedded RPC helper assets before they can run the live transport.
 
 ## Goals
 
@@ -16,7 +16,7 @@ Status: Delta Chat integration, account provisioning, state layout, pairing logi
 
 ## Quickstart
 
-This is the intended operator flow for a Linux release build that embeds the matching `deltachat-rpc-server` helper. The current source tree does not commit helper binaries, so development builds validate startup and then exit with a next action until a release asset is prepared.
+This is the intended operator flow for a Linux release build that embeds the matching `deltachat-rpc-server` helper. The source tree does not commit helper binaries, so builds without a prepared helper validate startup and then exit with a next action until a helper asset is prepared.
 
 1. Install the `deltaops` binary on the monitored Linux host, for example at `/usr/local/bin/deltaops`.
 2. Create a private state directory, for example `/var/lib/deltaops`, owned by the service user and mode `0700`.
@@ -41,7 +41,7 @@ Avoid passing full `dcaccount:` setup URLs directly in shell history on shared h
 - Release builds should keep the operator experience to one copied `deltaops` file by embedding the matching platform-specific RPC server helper and extracting it at runtime.
 - This is not a pure-Go binary internally. Each supported OS and architecture needs a matching Delta Chat RPC server asset.
 - The MVP-supported account setup path is explicit operator input via either a chatmail provider URL such as `https://nine.testrun.org/` or a full chatmail `dcaccount:` setup URL. Provider-neutral arbitrary email account registration is out of scope.
-- The `internal/notify/dcrpc` package opens the embedded helper with `DC_ACCOUNTS_PATH` set to `<state>/deltachat-accounts`, creates or reuses one Delta Chat account, configures bot mode from the normalized account setup URL when needed, receives pairing messages, and sends alert text to the persisted contact ID.
+- The `internal/notify/dcrpc` package opens the embedded helper with `DC_ACCOUNTS_PATH` set to `<state>/deltachat-accounts`, creates or reuses one Delta Chat account, configures bot mode from the normalized account setup URL when needed, receives pairing messages, and sends status reports plus alert/recovery text to the persisted contact ID.
 - Default tests use fakes for the RPC boundary. Live provider-dependent tests must stay behind explicit integration controls.
 - The full decision is recorded in `meta/decisions/0001-delta-chat-integration.md`.
 
@@ -53,9 +53,9 @@ The MVP setup input is either a chatmail provider URL or a full chatmail `dcacco
 2. `DELTAOPS_DCACCOUNT_URL=https://nine.testrun.org/` or `DELTAOPS_DCACCOUNT_URL=dcaccount:...`.
 3. `delta_chat.dcaccount_url` in the config file.
 
-Provider homepage URLs are normalized to the Delta Chat account setup link before transport setup. For example, `https://nine.testrun.org/` becomes `DCACCOUNT:https://nine.testrun.org/new`, matching the account link published on that provider homepage. If no setup input is provided, startup should fail with a next action telling the operator to provide one of those inputs. Existing IMAP/SMTP credentials and OAuth setup are deferred, not fallback behavior for the MVP.
+HTTPS provider/setup URLs are wrapped for Delta Chat account setup before transport setup. Provider homepage URLs with an empty or `/` path are normalized to `/new`; for example, `https://nine.testrun.org/` becomes `DCACCOUNT:https://nine.testrun.org/new`, matching the account link published on that provider homepage. If no setup input is provided, startup fails with a next action telling the operator to provide one of those inputs. Existing IMAP/SMTP credentials and OAuth setup are deferred, not fallback behavior for the MVP.
 
-The MVP treats the provisioning input as startup input. Keep it available for restarts until the live Delta Chat account setup path proves that the input can be safely removed after first configuration.
+The CLI currently treats the provisioning input as required startup input, even when the local Delta Chat account is already configured. Keep it available for restarts until a later preflight path can safely distinguish first-time setup from existing account state before validation.
 
 After account setup, DeltaOps should print the bot Delta Chat contact or secure-join URI, the bot email address if available, and the local pairing code. It should not print the consumed account setup URL.
 
@@ -124,7 +124,7 @@ Alert and recovery messages include host, check, target, observed value, thresho
 
 ## Runtime Loop
 
-The `internal/runtime` package wires account readiness, pairing, collection, alert evaluation, and notification delivery behind interfaces for deterministic tests.
+The `internal/runtime` package wires account readiness, pairing, status reports, collection, alert evaluation, and notification delivery behind interfaces for deterministic tests.
 
 Startup order:
 
@@ -164,7 +164,7 @@ Build the current CLI binary with:
 mise exec -- go build -o bin/deltaops ./cmd/deltaops
 ```
 
-The source tree does not commit upstream `deltachat-rpc-server` binaries. On Linux, a valid development `run` prepares the state layout and then exits with a clear next action explaining that a release must be built with the matching Delta Chat RPC helper asset. This preserves the one-file operator target while keeping the missing runtime dependency explicit.
+The source tree does not commit upstream `deltachat-rpc-server` binaries. On Linux or macOS, a valid development `run` without a prepared helper prepares the state layout and then exits with a clear next action explaining that the build needs the matching Delta Chat RPC helper asset. This preserves the one-file operator target while keeping the missing runtime dependency explicit.
 
 The MVP deployment platform is Linux. macOS `run` is supported for development with filesystem-only metrics. Other operating systems can compile developer commands such as `version`, but `run` rejects unsupported operating systems before collector startup. Cross-compilation requires more than setting `GOOS` and `GOARCH`: each supported architecture release must embed the corresponding upstream `deltachat-rpc-server` artifact built for that target.
 
@@ -229,7 +229,7 @@ ReadWritePaths=/var/lib/deltaops
 WantedBy=multi-user.target
 ```
 
-`SIGINT` and `SIGTERM` cancel the runtime loop cleanly. Runtime signal-source tests cover this cancellation path; an end-to-end systemd stop check should be repeated once the packaged Delta Chat runtime is available.
+`SIGINT` and `SIGTERM` cancel the runtime loop cleanly. Runtime signal-source tests cover this cancellation path; an end-to-end systemd stop check should be repeated during Linux deployment validation.
 
 ## Operations
 
@@ -304,10 +304,10 @@ Opt-in Docker smoke test for the embedded Linux RPC helper path:
 sh scripts/e2e-docker.sh smoke
 ```
 
-Live Docker runs require a real `DELTAOPS_DCACCOUNT_URL` and are documented in `test/e2e/README.md`.
+Live Docker runs require a real provider or `dcaccount:` value in `DELTAOPS_DCACCOUNT_URL` and are documented in `test/e2e/README.md`.
 
 ## Planning
 
 The local issue plan lives in `meta/issues.md`, with issue details in `meta/issues/`.
 
-The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, runtime loop, structured transport-failure logging, CLI packaging behavior, operation/security documentation, and live Delta Chat transport wiring.
+The first implementation steps recorded the Delta Chat integration path, single-binary constraint, account provisioning flow, config/state layout, pairing-code contact binding, MVP metric-source decision, metric collection, alert-state evaluation, runtime loop, structured transport-failure logging, CLI packaging behavior, operation/security documentation, live Delta Chat transport wiring, embedded helper packaging, macOS development support, provider URL provisioning, pairing/startup status reports, and the Docker smoke harness.
