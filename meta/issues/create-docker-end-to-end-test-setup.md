@@ -23,3 +23,4 @@ Create a reproducible Docker-based test environment that can exercise DeltaOps w
 ## Notes
 
 - Prefer a hermetic setup if practical. If a real chatmail provider is required, make that explicit and keep it out of default CI.
+- An initial Docker smoke/live harness can verify the embedded Linux RPC helper reaches Delta Chat provisioning. Keep this issue open until alert and recovery notification reproduction is automated or documented end to end.

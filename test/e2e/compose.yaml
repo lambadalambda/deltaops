@@ -1,0 +1,16 @@
+services:
+  deltaops:
+    build:
+      context: ../..
+      dockerfile: test/e2e/Dockerfile
+      args:
+        DELTAOPS_BINARY: ${DELTAOPS_BINARY:-bin/deltaops-linux-amd64}
+    platform: ${DELTAOPS_DOCKER_PLATFORM:-linux/amd64}
+    environment:
+      DELTAOPS_DCACCOUNT_URL: ${DELTAOPS_DCACCOUNT_URL:-}
+    init: true
+    volumes:
+      - deltaops-state:/state
+
+volumes:
+  deltaops-state:

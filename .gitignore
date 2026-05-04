@@ -8,6 +8,7 @@
 /deltaops-state/
 /dc-data/
 /internal/notify/dcrpc/assets/deltachat-rpc-server-*
+/test/e2e/.env
 *.out
 *.test
 .DS_Store

@@ -294,6 +294,14 @@ Build command:
 mise exec -- go build -o bin/deltaops ./cmd/deltaops
 ```
 
+Opt-in Docker smoke test for the embedded Linux RPC helper path:
+
+```sh
+sh scripts/e2e-docker.sh smoke
+```
+
+Live Docker runs require a real `DELTAOPS_DCACCOUNT_URL` and are documented in `test/e2e/README.md`.
+
 ## Planning
 
 The local issue plan lives in `meta/issues.md`, with issue details in `meta/issues/`.

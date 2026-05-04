@@ -1,0 +1,12 @@
+.git/
+.env
+.env.*
+.mise.local.toml
+.deltaops/
+deltaops-state/
+dc-data/
+test/e2e/.env
+internal/notify/dcrpc/assets/deltachat-rpc-server-*
+bin/*
+!bin/deltaops-linux-amd64
+!bin/deltaops-linux-arm64
