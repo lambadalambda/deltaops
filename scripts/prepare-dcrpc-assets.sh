@@ -72,7 +72,7 @@ for target in "$@"; do
 	tmp="$tmp_dir/$filename"
 	rm -f "$tmp"
 	printf 'downloading %s from %s\n' "$target" "$url"
-	curl -fL --proto '=https' --tlsv1.2 -o "$tmp" "$url"
+	curl -fL --retry 5 --retry-delay 2 --retry-max-time 120 --proto '=https' --tlsv1.2 -o "$tmp" "$url"
 	actual=$(sha256_file "$tmp")
 	if [ "$actual" != "$sha256" ]; then
 		rm -f "$tmp"
