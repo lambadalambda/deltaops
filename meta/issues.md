@@ -1,2 +1,3 @@
+- [ ] [Build GitHub release binaries](issues/build-github-release-binaries.md)
 - [ ] [Create Docker end-to-end test setup](issues/create-docker-end-to-end-test-setup.md)
 - [ ] [Evaluate alternative Delta Chat bindings later](issues/evaluate-alternative-delta-chat-bindings-later.md)
