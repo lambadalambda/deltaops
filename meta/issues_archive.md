@@ -12,3 +12,4 @@
 - [x] [Implement live Delta Chat transport](issues/implement-live-delta-chat-transport.md)
 - [x] [Add macOS development support](issues/add-macos-development-support.md)
 - [x] [Ship embedded Delta Chat RPC server assets](issues/ship-embedded-delta-chat-rpc-server-assets.md)
+- [x] [Support chatmail provider URL provisioning](issues/support-chatmail-provider-url-provisioning.md)

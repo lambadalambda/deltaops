@@ -124,7 +124,7 @@ func TestResolvePathsRejectsRelativeXDGPaths(t *testing.T) {
 }
 
 func TestStartupConfigValidateReportsProvisioningErrors(t *testing.T) {
-	err := (StartupConfig{Provisioning: DeltaChatProvisioning{DCAccountURL: "https://provider.example/signup"}}).Validate()
+	err := (StartupConfig{Provisioning: DeltaChatProvisioning{DCAccountURL: "smtp://provider.example/signup"}}).Validate()
 	if err == nil {
 		t.Fatal("Validate returned nil, want invalid provisioning error")
 	}

@@ -84,7 +84,7 @@ func runCommand(args []string, options Options) int {
 	var dcAccountURL string
 	var configPath string
 	var stateDir string
-	flags.StringVar(&dcAccountURL, "dcaccount-url", "", "chatmail dcaccount URL used to provision the Delta Chat account")
+	flags.StringVar(&dcAccountURL, "dcaccount-url", "", "chatmail dcaccount or provider URL used to provision the Delta Chat account")
 	flags.StringVar(&configPath, "config", "", "path to config file")
 	flags.StringVar(&stateDir, "state-dir", "", "path to DeltaOps state directory")
 
@@ -146,7 +146,7 @@ func runCommand(args []string, options Options) int {
 	if err := startup.Validate(); err != nil {
 		return printStartupError(options.Stderr, &appruntime.OperatorError{
 			Message:    "startup configuration is incomplete",
-			NextAction: "provide --dcaccount-url, DELTAOPS_DCACCOUNT_URL, or delta_chat.dcaccount_url",
+			NextAction: "provide a dcaccount: URL or chatmail provider URL with --dcaccount-url, DELTAOPS_DCACCOUNT_URL, or delta_chat.dcaccount_url",
 			Cause:      err,
 		})
 	}
@@ -452,7 +452,7 @@ func printUsage(w io.Writer) {
 }
 
 func printRunUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: deltaops run [--dcaccount-url dcaccount:...] [--config path] [--state-dir path]")
+	fmt.Fprintln(w, "usage: deltaops run [--dcaccount-url dcaccount:...|https://provider/] [--config path] [--state-dir path]")
 }
 
 func (options Options) withDefaults() Options {

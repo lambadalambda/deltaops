@@ -99,6 +99,47 @@ func TestRunStartsRuntimeWithResolvedInputs(t *testing.T) {
 	}
 }
 
+func TestRunAcceptsChatmailProviderURL(t *testing.T) {
+	var out, errOut bytes.Buffer
+	var got RuntimeConfig
+	process := &fakeRuntimeProcess{}
+	options := testOptions(t, "linux", nil, &out, &errOut)
+	options.RuntimeFactory = func(_ context.Context, config RuntimeConfig) (RuntimeProcess, error) {
+		got = config
+		return process, nil
+	}
+
+	exit := Run([]string{"run", "--dcaccount-url", "https://nine.testrun.org/"}, options)
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", exit, errOut.String())
+	}
+	if got.Provisioning.DCAccountURL != "DCACCOUNT:https://nine.testrun.org/new" {
+		t.Fatalf("provisioning URL = %q", got.Provisioning.DCAccountURL)
+	}
+	if strings.Contains(out.String()+errOut.String(), "nine.testrun.org") {
+		t.Fatalf("output leaked provider setup input: stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestRunAcceptsEnvChatmailProviderURL(t *testing.T) {
+	var out, errOut bytes.Buffer
+	var got RuntimeConfig
+	process := &fakeRuntimeProcess{}
+	options := testOptions(t, "linux", map[string]string{"DELTAOPS_DCACCOUNT_URL": "https://nine.testrun.org/"}, &out, &errOut)
+	options.RuntimeFactory = func(_ context.Context, config RuntimeConfig) (RuntimeProcess, error) {
+		got = config
+		return process, nil
+	}
+
+	exit := Run([]string{"run"}, options)
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", exit, errOut.String())
+	}
+	if got.Provisioning.DCAccountURL != "DCACCOUNT:https://nine.testrun.org/new" {
+		t.Fatalf("provisioning URL = %q", got.Provisioning.DCAccountURL)
+	}
+}
+
 func TestRunReportsRuntimeFactoryErrorsWithoutLeakingProvisioningURL(t *testing.T) {
 	var out, errOut bytes.Buffer
 	options := testOptions(t, "linux", nil, &out, &errOut)
@@ -197,6 +238,29 @@ func TestRunReadsDCAccountURLFromConfigFile(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "Delta Chat RPC helper") {
 		t.Fatalf("stderr %q does not reach runtime packaging error", errOut.String())
+	}
+}
+
+func TestRunReadsProviderURLFromConfigFile(t *testing.T) {
+	var out, errOut bytes.Buffer
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("delta_chat.dcaccount_url: https://nine.testrun.org/\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	var got RuntimeConfig
+	process := &fakeRuntimeProcess{}
+	options := testOptions(t, "linux", nil, &out, &errOut)
+	options.RuntimeFactory = func(_ context.Context, config RuntimeConfig) (RuntimeProcess, error) {
+		got = config
+		return process, nil
+	}
+
+	exit := Run([]string{"run", "--config", configPath}, options)
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", exit, errOut.String())
+	}
+	if got.Provisioning.DCAccountURL != "DCACCOUNT:https://nine.testrun.org/new" {
+		t.Fatalf("provisioning URL = %q", got.Provisioning.DCAccountURL)
 	}
 }
 

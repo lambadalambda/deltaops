@@ -25,7 +25,7 @@ Use a real chatmail provisioning URL from an ignored env file:
 
 ```sh
 install -m 600 /dev/null test/e2e/.env
-printf 'DELTAOPS_DCACCOUNT_URL=dcaccount:...\n' > test/e2e/.env
+printf 'DELTAOPS_DCACCOUNT_URL=https://nine.testrun.org/\n' > test/e2e/.env
 sh scripts/e2e-docker.sh live
 ```
 
@@ -39,7 +39,7 @@ Remove disposable Docker state with:
 sh scripts/e2e-docker.sh reset
 ```
 
-Live state is stored in the `deltaops-e2e_deltaops-state` Docker volume. Smoke state uses `deltaops-e2e-smoke_deltaops-state` and is cleaned automatically. Do not put real `dcaccount:` URLs, account databases, or binding files in git.
+Live state is stored in the `deltaops-e2e_deltaops-state` Docker volume. Smoke state uses `deltaops-e2e-smoke_deltaops-state` and is cleaned automatically. Do not put real `dcaccount:` URLs, provider URLs with tokens, account databases, or binding files in git.
 
 ## Target Selection
 

@@ -20,7 +20,7 @@ This is the intended operator flow for a Linux release build that embeds the mat
 
 1. Install the `deltaops` binary on the monitored Linux host, for example at `/usr/local/bin/deltaops`.
 2. Create a private state directory, for example `/var/lib/deltaops`, owned by the service user and mode `0700`.
-3. Provide the chatmail provisioning URL with `--dcaccount-url`, `DELTAOPS_DCACCOUNT_URL`, or `delta_chat.dcaccount_url` in the config file.
+3. Provide either a chatmail provider URL such as `https://nine.testrun.org/` or a full `dcaccount:` setup URL with `--dcaccount-url`, `DELTAOPS_DCACCOUNT_URL`, or `delta_chat.dcaccount_url` in the config file.
 4. Start `deltaops run --state-dir /var/lib/deltaops`.
 5. Read the startup output for the bot contact data and one-time pairing code.
 6. Send the pairing code to the bot from the Delta Chat account that should receive alerts.
@@ -30,34 +30,34 @@ Minimal config file shape:
 
 ```yaml
 delta_chat:
-  dcaccount_url: dcaccount:...
+  dcaccount_url: https://nine.testrun.org/
 ```
 
-Avoid passing provisioning URLs directly in shell history on shared hosts. Prefer a private config file or service environment file with mode `0600`.
+Avoid passing full `dcaccount:` setup URLs directly in shell history on shared hosts. Prefer a private config file or service environment file with mode `0600`.
 
 ## Delta Chat Integration
 
 - DeltaOps will use `github.com/chatmail/rpc-client-go/v2` and a managed `deltachat-rpc-server` subprocess for the MVP path.
 - Release builds should keep the operator experience to one copied `deltaops` file by embedding the matching platform-specific RPC server helper and extracting it at runtime.
 - This is not a pure-Go binary internally. Each supported OS and architecture needs a matching Delta Chat RPC server asset.
-- The MVP-supported account setup path is explicit operator input via a chatmail `dcaccount:` URL. Provider-neutral email account auto-registration is out of scope unless a provider offers a documented automation flow.
-- The `internal/notify/dcrpc` package opens the embedded helper with `DC_ACCOUNTS_PATH` set to `<state>/deltachat-accounts`, creates or reuses one Delta Chat account, configures bot mode from the `dcaccount:` URL when needed, receives pairing messages, and sends alert text to the persisted contact ID.
+- The MVP-supported account setup path is explicit operator input via either a chatmail provider URL such as `https://nine.testrun.org/` or a full chatmail `dcaccount:` setup URL. Provider-neutral arbitrary email account registration is out of scope.
+- The `internal/notify/dcrpc` package opens the embedded helper with `DC_ACCOUNTS_PATH` set to `<state>/deltachat-accounts`, creates or reuses one Delta Chat account, configures bot mode from the normalized account setup URL when needed, receives pairing messages, and sends alert text to the persisted contact ID.
 - Default tests use fakes for the RPC boundary. Live provider-dependent tests must stay behind explicit integration controls.
 - The full decision is recorded in `meta/decisions/0001-delta-chat-integration.md`.
 
 ## Account Provisioning
 
-The MVP setup input is a chatmail `dcaccount:` URL. DeltaOps will accept it from these sources, in order:
+The MVP setup input is either a chatmail provider URL or a full chatmail `dcaccount:` setup URL. DeltaOps will accept it from these sources, in order:
 
-1. `--dcaccount-url dcaccount:...`
-2. `DELTAOPS_DCACCOUNT_URL=dcaccount:...`
-3. `delta_chat.dcaccount_url` in the config file
+1. `--dcaccount-url https://nine.testrun.org/` or `--dcaccount-url dcaccount:...`.
+2. `DELTAOPS_DCACCOUNT_URL=https://nine.testrun.org/` or `DELTAOPS_DCACCOUNT_URL=dcaccount:...`.
+3. `delta_chat.dcaccount_url` in the config file.
 
-If none is provided, startup should fail with a next action telling the operator to provide one of those inputs. Existing IMAP/SMTP credentials and OAuth setup are deferred, not fallback behavior for the MVP.
+Provider homepage URLs are normalized to the Delta Chat account setup link before transport setup. For example, `https://nine.testrun.org/` becomes `DCACCOUNT:https://nine.testrun.org/new`, matching the account link published on that provider homepage. If no setup input is provided, startup should fail with a next action telling the operator to provide one of those inputs. Existing IMAP/SMTP credentials and OAuth setup are deferred, not fallback behavior for the MVP.
 
-The MVP treats the provisioning URL as startup input. Keep it available for restarts until the live Delta Chat account setup path proves that the URL can be safely removed after first configuration.
+The MVP treats the provisioning input as startup input. Keep it available for restarts until the live Delta Chat account setup path proves that the input can be safely removed after first configuration.
 
-After account setup, DeltaOps should print the bot Delta Chat contact or secure-join URI, the bot email address if available, and the local pairing code. It should not print the consumed `dcaccount:` URL.
+After account setup, DeltaOps should print the bot Delta Chat contact or secure-join URI, the bot email address if available, and the local pairing code. It should not print the consumed account setup URL.
 
 The provisioning decision is recorded in `meta/decisions/0002-account-provisioning.md`.
 
@@ -153,7 +153,7 @@ Commands:
 2. `deltaops version`: print version metadata.
 3. `deltaops run --help`: print supported startup flags.
 
-Startup accepts the chatmail provisioning URL from `--dcaccount-url`, `DELTAOPS_DCACCOUNT_URL`, or `delta_chat.dcaccount_url` in the config file. The CLI also supports `--config` and `--state-dir` overrides. The config reader intentionally supports only the current minimal key shape needed by the MVP, not arbitrary YAML configuration.
+Startup accepts a chatmail provider URL or full `dcaccount:` setup URL from `--dcaccount-url`, `DELTAOPS_DCACCOUNT_URL`, or `delta_chat.dcaccount_url` in the config file. The CLI also supports `--config` and `--state-dir` overrides. The config reader intentionally supports only the current minimal key shape needed by the MVP, not arbitrary YAML configuration.
 
 Build the current CLI binary with:
 
@@ -188,14 +188,14 @@ sh scripts/prepare-dcrpc-assets.sh darwin/arm64
 mise exec -- go build -o bin/deltaops ./cmd/deltaops
 ```
 
-Use `darwin/amd64` on Intel macOS. Without the prepared helper, `bin/deltaops run --dcaccount-url dcaccount:...` should reach the normal helper-packaging error instead of rejecting macOS as unsupported.
+Use `darwin/amd64` on Intel macOS. Without the prepared helper, `bin/deltaops run --dcaccount-url https://nine.testrun.org/` should reach the normal helper-packaging error instead of rejecting macOS as unsupported.
 
 ## Linux Service Example
 
 Use a dedicated service user and a private environment file rather than putting secrets in the unit. Example `/etc/deltaops/deltaops.env`:
 
 ```sh
-DELTAOPS_DCACCOUNT_URL=dcaccount:...
+DELTAOPS_DCACCOUNT_URL=https://nine.testrun.org/
 ```
 
 Restrict it with mode `0600`. Example systemd unit:
@@ -234,7 +234,7 @@ Reset pairing by stopping DeltaOps, deleting `<state>/binding.json`, and startin
 
 Back up the state directory only to encrypted storage. Stop DeltaOps before file-level backups so Delta Chat account databases and binding files are consistent. Restore the directory with the original owner and restrictive permissions before restarting the service.
 
-Rotate the Delta Chat bot account by stopping DeltaOps, backing up or deleting the existing state directory, provisioning a new `dcaccount:` URL, and pairing the new bot contact. Rotate the alert recipient by deleting only `binding.json` and pairing a new contact.
+Rotate the Delta Chat bot account by stopping DeltaOps, backing up or deleting the existing state directory, provisioning with a new provider or `dcaccount:` URL, and pairing the new bot contact. Rotate the alert recipient by deleting only `binding.json` and pairing a new contact.
 
 Log rotation is handled by the service manager when stdout and stderr go to journald. If logs are redirected to files, use normal Linux log rotation and restrict file permissions because alert metadata can reveal operational state.
 
@@ -254,7 +254,7 @@ deltaops
 On first run, DeltaOps should:
 
 1. Create or load its local state directory.
-2. Configure a Delta Chat account using a supplied chatmail `dcaccount:` URL from flag, environment, or config.
+2. Configure a Delta Chat account using a supplied chatmail provider or `dcaccount:` URL from flag, environment, or config.
 3. Print contact data and a one-time pairing code for the bot.
 4. Wait for the first incoming message that contains the pairing code.
 5. Persist that sender as the alert recipient.
@@ -266,7 +266,7 @@ After binding, later messages from other contacts should not receive host alerts
 
 - Local state may contain Delta Chat account credentials, message databases, and the bound contact. It must be stored outside the repository with restrictive permissions.
 - The MVP accepts plaintext local state protected by filesystem permissions; OS keyring integration is deferred.
-- Treat `dcaccount:` URLs as credentials. Do not commit them, place them in world-readable unit files, or pass them through shared shell history.
+- Treat full `dcaccount:` URLs as credentials. Do not commit them, place them in world-readable unit files, or pass them through shared shell history. Provider homepage URLs are usually public, but provider URLs with tokens or generated setup data are sensitive.
 - The pairing code prevents a random first sender from taking over alert delivery during setup. Anyone who can read startup output during the unbound window can pair the monitor.
 - Alert messages can reveal hostnames, resource pressure, filesystem targets, thresholds, and recovery state. The monitor should send them only to the persisted bound contact.
 - Runtime logs redact fields that look like provisioning URLs, setup codes, message text, message bodies, errors, or causes. Normal lifecycle logs keep safe metadata such as metric, target, kind, and severity.

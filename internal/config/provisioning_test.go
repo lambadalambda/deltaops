@@ -17,6 +17,37 @@ func TestResolveProvisioningPrefersFlag(t *testing.T) {
 	}
 }
 
+func TestResolveProvisioningNormalizesChatmailProviderURL(t *testing.T) {
+	provisioning := ResolveProvisioning(ProvisioningSources{FlagDCAccountURL: " https://nine.testrun.org/ "})
+
+	if provisioning.DCAccountURL != "DCACCOUNT:https://nine.testrun.org/new" {
+		t.Fatalf("DCAccountURL = %q", provisioning.DCAccountURL)
+	}
+}
+
+func TestNormalizeAccountSetupInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "dcaccount", input: " dcaccount:secret ", want: "dcaccount:secret"},
+		{name: "provider home", input: "https://nine.testrun.org/", want: "DCACCOUNT:https://nine.testrun.org/new"},
+		{name: "provider home with tracking", input: "https://nine.testrun.org/?utm=x#top", want: "DCACCOUNT:https://nine.testrun.org/new"},
+		{name: "provider host", input: "https://nine.testrun.org", want: "DCACCOUNT:https://nine.testrun.org/new"},
+		{name: "provider endpoint", input: "https://nine.testrun.org/new", want: "DCACCOUNT:https://nine.testrun.org/new"},
+		{name: "unsupported", input: "mailto:bot@example.test", want: "mailto:bot@example.test"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeAccountSetupInput(tt.input); got != tt.want {
+				t.Fatalf("NormalizeAccountSetupInput(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveProvisioningFallsBackToEnvThenConfig(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -71,6 +102,13 @@ func TestProvisioningValidateAcceptsDCAccountURL(t *testing.T) {
 	}
 }
 
+func TestProvisioningValidateAcceptsProviderURL(t *testing.T) {
+	provisioning := DeltaChatProvisioning{DCAccountURL: "https://nine.testrun.org/"}
+	if err := provisioning.Validate(); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+}
+
 func TestProvisioningValidateRejectsEmptyDCAccountURLPayload(t *testing.T) {
 	err := (DeltaChatProvisioning{DCAccountURL: "dcaccount:   "}).Validate()
 	if err == nil {
@@ -87,14 +125,14 @@ func TestProvisioningValidateRejectsEmptyDCAccountURLPayload(t *testing.T) {
 }
 
 func TestProvisioningValidateRejectsUnsupportedURLWithoutLeakingValue(t *testing.T) {
-	const unsupported = "https://provider.example/signup?token=secret"
+	const unsupported = "smtp://provider.example/signup?token=secret"
 	err := (DeltaChatProvisioning{DCAccountURL: unsupported}).Validate()
 	if err == nil {
 		t.Fatal("Validate returned nil, want unsupported input error")
 	}
 
 	message := err.Error()
-	if !strings.Contains(message, "dcaccount:") {
+	if !strings.Contains(message, "dcaccount:") || !strings.Contains(message, "https://") {
 		t.Fatalf("error %q does not explain supported URL scheme", message)
 	}
 	if strings.Contains(message, unsupported) || strings.Contains(message, "secret") {
