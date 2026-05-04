@@ -22,20 +22,36 @@ func TestRunnerStartsWithExistingBinding(t *testing.T) {
 	runner := newTestRunner(t, Dependencies{
 		Account:   &fakeAccount{},
 		Pairer:    &fakePairer{bound: &contact},
-		Collector: &fakeCollector{samples: [][]collector.Sample{{{Metric: collector.MetricDiskUsedPercent, Target: "/", Value: 96}}}},
+		Collector: &fakeCollector{samples: [][]collector.Sample{{{Metric: collector.MetricDiskUsedPercent, Target: "/", Value: 42}}, {{Metric: collector.MetricDiskUsedPercent, Target: "/", Value: 96}}}},
 		Evaluator: &fakeEvaluator{decisions: [][]alert.Decision{{{Kind: alert.KindAlert, Metric: collector.MetricDiskUsedPercent}}}},
 		Notifier:  notifier,
 		Sleeper:   sleeper,
 	})
+	runner.config.Host = "host1"
 
 	if err := runner.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(notifier.reports) != 1 {
+		t.Fatalf("sent reports = %d, want 1", len(notifier.reports))
+	}
+	if notifier.reports[0].contact != contact {
+		t.Fatalf("report contact = %#v, want %#v", notifier.reports[0].contact, contact)
+	}
+	if notifier.reports[0].report.Reason != ReportReasonStartup || notifier.reports[0].report.Host != "host1" {
+		t.Fatalf("report = %#v, want startup report for host1", notifier.reports[0].report)
+	}
+	if got := notifier.reports[0].report.Message(); !strings.Contains(got, "reason=startup") || !strings.Contains(got, "host=host1") || !strings.Contains(got, "disk.used_percent") || !strings.Contains(got, "observed=42.00") {
+		t.Fatalf("report message %q does not include expected status fields", got)
 	}
 	if len(notifier.sent) != 1 {
 		t.Fatalf("sent notifications = %d, want 1", len(notifier.sent))
 	}
 	if notifier.sent[0].contact != contact {
 		t.Fatalf("notification contact = %#v, want %#v", notifier.sent[0].contact, contact)
+	}
+	if got, want := strings.Join(notifier.sequence, ","), "report,notify"; got != want {
+		t.Fatalf("notification sequence = %s, want %s", got, want)
 	}
 }
 
@@ -44,20 +60,45 @@ func TestRunnerWaitsForPairingWhenUnbound(t *testing.T) {
 	contact := binding.Contact{ID: "contact-1"}
 	pairer := &fakePairer{paired: contact}
 	sleeper := &fakeSleeper{onSleep: func(int, time.Duration) { cancel() }}
+	notifier := &fakeNotifier{}
 	runner := newTestRunner(t, Dependencies{
 		Account:   &fakeAccount{},
 		Pairer:    pairer,
-		Collector: &fakeCollector{samples: [][]collector.Sample{{}}},
+		Collector: &fakeCollector{samples: [][]collector.Sample{{{Metric: collector.MetricMemoryPressurePercent, Target: "memory", Value: 25}}, {}}},
 		Evaluator: &fakeEvaluator{decisions: [][]alert.Decision{{}}},
-		Notifier:  &fakeNotifier{},
+		Notifier:  notifier,
 		Sleeper:   sleeper,
 	})
+	runner.config.Host = "host1"
 
 	if err := runner.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 	if pairer.waits != 1 {
 		t.Fatalf("pairing waits = %d, want 1", pairer.waits)
+	}
+	if len(notifier.reports) != 1 {
+		t.Fatalf("sent reports = %d, want 1", len(notifier.reports))
+	}
+	if notifier.reports[0].report.Reason != ReportReasonPaired {
+		t.Fatalf("report reason = %q, want paired", notifier.reports[0].report.Reason)
+	}
+	if got := notifier.reports[0].report.Message(); !strings.Contains(got, "reason=paired") || !strings.Contains(got, "memory.pressure_percent") || !strings.Contains(got, "observed=25.00") {
+		t.Fatalf("report message %q does not include pairing status", got)
+	}
+}
+
+func TestReportMessageIncludesCurrentSamples(t *testing.T) {
+	report := Report{Reason: ReportReasonStartup, Host: "host1", Samples: []collector.Sample{
+		{Metric: collector.MetricDiskUsedPercent, Target: "/", Value: 42.125},
+		{Metric: collector.MetricLoad1, Target: "system", Value: 0.5},
+	}}
+
+	message := report.Message()
+	for _, want := range []string{"DeltaOps status report", "reason=startup", "host=host1", "disk.used_percent", "target=/", "observed=42.12", "load.1m", "target=system", "observed=0.50"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message %q does not include %q", message, want)
+		}
 	}
 }
 
@@ -107,8 +148,8 @@ func TestRunnerPollsMultipleIterationsWithoutSleeping(t *testing.T) {
 	if err := runner.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if collector.calls != 2 {
-		t.Fatalf("collector calls = %d, want 2", collector.calls)
+	if collector.calls != 3 {
+		t.Fatalf("collector calls = %d, want startup report plus two polls", collector.calls)
 	}
 }
 
@@ -184,8 +225,8 @@ func TestRunnerRetriesNotificationFailureWithBackoff(t *testing.T) {
 	if err := runner.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if notifier.calls != 2 {
-		t.Fatalf("notifier calls = %d, want 2", notifier.calls)
+	if notifier.notifyCalls != 2 {
+		t.Fatalf("notify calls = %d, want 2", notifier.notifyCalls)
 	}
 	if account.calls != 2 {
 		t.Fatalf("account readiness calls = %d, want startup plus reconnect", account.calls)
@@ -220,6 +261,42 @@ func TestRunnerStopsAfterBoundedNotificationRetries(t *testing.T) {
 	}
 	if !logger.has("notification_failed") {
 		t.Fatalf("missing notification_failed event in %#v", logger.events)
+	}
+}
+
+func TestRunnerStopsAfterBoundedStatusReportRetries(t *testing.T) {
+	contact := binding.Contact{ID: "contact-1"}
+	logger := &fakeLogger{}
+	account := &fakeAccount{}
+	notifier := &fakeNotifier{reportErrors: []error{errors.New("send failed"), errors.New("still failed")}}
+	runner, err := NewRunner(Config{PollInterval: time.Minute, InitialBackoff: time.Second, MaxBackoff: 2 * time.Second, MaxNotifyAttempts: 2}, Dependencies{
+		Account:   account,
+		Pairer:    &fakePairer{bound: &contact},
+		Collector: &fakeCollector{samples: [][]collector.Sample{{{Metric: collector.MetricDiskUsedPercent, Target: "/", Value: 42}}}},
+		Evaluator: &fakeEvaluator{},
+		Notifier:  notifier,
+		Sleeper:   &fakeSleeper{},
+		Logger:    logger,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner returned error: %v", err)
+	}
+
+	err = runner.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run returned nil error, want bounded report retry failure")
+	}
+	if !strings.Contains(err.Error(), "status report delivery failed") || !strings.Contains(err.Error(), "next action") {
+		t.Fatalf("error %q does not include status report next action", err)
+	}
+	if notifier.reportCalls != 2 {
+		t.Fatalf("report calls = %d, want 2", notifier.reportCalls)
+	}
+	if account.calls != 2 {
+		t.Fatalf("account readiness calls = %d, want startup plus report retry readiness", account.calls)
+	}
+	if !logger.has("status_report_failed") {
+		t.Fatalf("missing status_report_failed event in %#v", logger.events)
 	}
 }
 
@@ -415,13 +492,20 @@ func (e *fakeEvaluator) Evaluate([]collector.Sample) []alert.Decision {
 }
 
 type fakeNotifier struct {
-	errors []error
-	calls  int
-	sent   []sentDecision
+	errors       []error
+	reportErrors []error
+	calls        int
+	notifyCalls  int
+	reportCalls  int
+	sent         []sentDecision
+	reports      []sentReport
+	sequence     []string
 }
 
 func (n *fakeNotifier) Notify(_ context.Context, contact binding.Contact, decision alert.Decision) error {
 	n.calls++
+	n.notifyCalls++
+	n.sequence = append(n.sequence, "notify")
 	if len(n.errors) > 0 {
 		err := n.errors[0]
 		n.errors = n.errors[1:]
@@ -431,9 +515,27 @@ func (n *fakeNotifier) Notify(_ context.Context, contact binding.Contact, decisi
 	return nil
 }
 
+func (n *fakeNotifier) Report(_ context.Context, contact binding.Contact, report Report) error {
+	n.calls++
+	n.reportCalls++
+	n.sequence = append(n.sequence, "report")
+	if len(n.reportErrors) > 0 {
+		err := n.reportErrors[0]
+		n.reportErrors = n.reportErrors[1:]
+		return err
+	}
+	n.reports = append(n.reports, sentReport{contact: contact, report: report})
+	return nil
+}
+
 type sentDecision struct {
 	contact  binding.Contact
 	decision alert.Decision
+}
+
+type sentReport struct {
+	contact binding.Contact
+	report  Report
 }
 
 type fakeSleeper struct {

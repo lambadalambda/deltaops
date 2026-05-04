@@ -261,7 +261,7 @@ func newRuntimeProcess(ctx context.Context, runtimeConfig RuntimeConfig, transpo
 		host = "unknown"
 	}
 	signals := appruntime.NewOSSignalSource()
-	runner, err := appruntime.NewRunner(appruntime.Config{}, appruntime.Dependencies{
+	runner, err := appruntime.NewRunner(appruntime.Config{Host: host}, appruntime.Dependencies{
 		Account:   notify.RuntimeAccount{Transport: transport},
 		Pairer:    notify.RuntimePairer{Manager: manager, Transport: transport},
 		Collector: collector,

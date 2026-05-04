@@ -5,6 +5,7 @@ import (
 
 	"deltaops/internal/alert"
 	"deltaops/internal/binding"
+	appruntime "deltaops/internal/runtime"
 )
 
 type ReadyTransport interface {
@@ -53,4 +54,8 @@ func (p RuntimePairer) WaitForPairing(ctx context.Context) (binding.Contact, err
 
 func (n RuntimeNotifier) Notify(ctx context.Context, contact binding.Contact, decision alert.Decision) error {
 	return n.Transport.Send(ctx, Contact{ID: contact.ID, Address: contact.Address, DisplayName: contact.DisplayName}, OutgoingMessage{Text: decision.Message()})
+}
+
+func (n RuntimeNotifier) Report(ctx context.Context, contact binding.Contact, report appruntime.Report) error {
+	return n.Transport.Send(ctx, Contact{ID: contact.ID, Address: contact.Address, DisplayName: contact.DisplayName}, OutgoingMessage{Text: report.Message()})
 }

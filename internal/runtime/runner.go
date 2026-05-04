@@ -21,6 +21,7 @@ const (
 )
 
 type Config struct {
+	Host                    string
 	PollInterval            time.Duration
 	InitialBackoff          time.Duration
 	MaxBackoff              time.Duration
@@ -47,6 +48,7 @@ type Evaluator interface {
 
 type Notifier interface {
 	Notify(context.Context, binding.Contact, alert.Decision) error
+	Report(context.Context, binding.Contact, Report) error
 }
 
 type Sleeper interface {
@@ -126,6 +128,7 @@ func (r *Runner) Run(ctx context.Context) (err error) {
 		return graceful(err)
 	}
 	contact, ok := r.deps.Pairer.BoundContact()
+	reportReason := ReportReasonStartup
 	if !ok {
 		r.log(ctx, "pairing_waiting", nil)
 		paired, err := r.deps.Pairer.WaitForPairing(ctx)
@@ -133,9 +136,13 @@ func (r *Runner) Run(ctx context.Context) (err error) {
 			return graceful(err)
 		}
 		contact = paired
+		reportReason = ReportReasonPaired
 		r.log(ctx, "pairing_bound", map[string]string{"source": "paired"})
 	} else {
 		r.log(ctx, "pairing_bound", map[string]string{"source": "existing"})
+	}
+	if err := r.sendStatusReport(ctx, contact, reportReason); err != nil {
+		return graceful(err)
 	}
 
 	for {
@@ -149,6 +156,14 @@ func (r *Runner) Run(ctx context.Context) (err error) {
 			return graceful(err)
 		}
 	}
+}
+
+func (r *Runner) sendStatusReport(ctx context.Context, contact binding.Contact, reason ReportReason) error {
+	samples, err := r.deps.Collector.Collect(ctx)
+	if err != nil {
+		return err
+	}
+	return r.reportWithBackoff(ctx, contact, Report{Reason: reason, Host: r.config.Host, Samples: samples})
 }
 
 func (r *Runner) poll(ctx context.Context, contact binding.Contact) error {
@@ -174,6 +189,31 @@ func (r *Runner) poll(ctx context.Context, contact binding.Contact) error {
 		}
 	}
 	return nil
+}
+
+func (r *Runner) reportWithBackoff(ctx context.Context, contact binding.Contact, report Report) error {
+	delay := r.config.InitialBackoff
+	attempt := 1
+	for {
+		if err := r.deps.Notifier.Report(ctx, contact, report); err == nil {
+			r.log(ctx, "status_report_sent", map[string]string{"attempt": strconv.Itoa(attempt), "reason": string(report.Reason), "sample_count": strconv.Itoa(len(report.Samples))})
+			return nil
+		} else {
+			r.log(ctx, "status_report_failed", map[string]string{"attempt": strconv.Itoa(attempt), "reason": string(report.Reason), "error": err.Error()})
+			if attempt >= r.config.MaxNotifyAttempts {
+				return &OperatorError{Message: fmt.Sprintf("status report delivery failed after %d attempts", attempt), NextAction: "check Delta Chat account state, network connectivity, and local logs", Cause: err}
+			}
+		}
+		if err := r.readyForNotificationRetry(ctx, r.config.MaxNotifyAttempts-attempt); err != nil {
+			return err
+		}
+		r.log(ctx, "status_report_retrying", map[string]string{"delay": delay.String(), "next_attempt": strconv.Itoa(attempt + 1)})
+		if err := r.deps.Sleeper.Sleep(ctx, delay); err != nil {
+			return err
+		}
+		delay = nextBackoff(delay, r.config.MaxBackoff)
+		attempt++
+	}
 }
 
 func (r *Runner) notifyWithBackoff(ctx context.Context, contact binding.Contact, decision alert.Decision) error {

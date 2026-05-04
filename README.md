@@ -130,20 +130,23 @@ Startup order:
 
 1. Wait for account or transport readiness with bounded backoff.
 2. Use an existing bound contact, or wait for pairing when unbound.
-3. Run metric collection and alert evaluation on the configured polling interval.
-4. Send non-noop alert and recovery decisions to the bound contact.
+3. Send a status report to the bound contact. First-time pairing reports use `reason=paired`; restarts with an existing binding use `reason=startup`.
+4. Run metric collection and alert evaluation on the configured polling interval.
+5. Send non-noop alert and recovery decisions to the bound contact.
+
+Status reports include host, reason, metric names, targets, and observed values for all samples collected at that moment. They are separate from threshold alerts and do not suppress later alert or recovery decisions.
 
 Defaults are a `1m` polling interval, `1s` initial backoff, and `1m` maximum backoff. Negative durations are rejected. `NewOSSignalSource` adapts `SIGINT` and `SIGTERM` into the runtime signal source on Unix-like systems so shutdown cancels the loop cleanly.
 
 ## Logging And Delivery Failures
 
-Runtime logging is structured JSON when `NewJSONLogger` is used. Logged lifecycle events include startup, account readiness, pairing, alert decisions, notification delivery failures, retries, queue-limit failures, sent notifications, and shutdown.
+Runtime logging is structured JSON when `NewJSONLogger` is used. Logged lifecycle events include startup, account readiness, pairing, status report delivery, alert decisions, notification delivery failures, retries, queue-limit failures, sent notifications, and shutdown.
 
 Log fields with names that look like secrets, setup codes, provisioning URLs, message text, message bodies, errors, or causes are redacted. Runtime alert-decision logs include only safe metadata such as metric, target, kind, and severity, not raw message contents or bound contact IDs.
 
-Notification delivery uses bounded retries. Defaults are `3` notification attempts and at most `32` pending notification decisions per polling iteration. Account-readiness checks after a send failure are also bounded by the remaining delivery retry budget. If delivery is exhausted or the pending notification bound is exceeded, the runtime returns an operator-facing error with a next action and leaves useful local logs for diagnosis.
+Notification delivery uses bounded retries for both status reports and alert/recovery notifications. Defaults are `3` notification attempts and at most `32` pending notification decisions per polling iteration. Account-readiness checks after a send failure are also bounded by the remaining delivery retry budget. If delivery is exhausted or the pending notification bound is exceeded, the runtime returns an operator-facing error with a next action and leaves useful local logs for diagnosis.
 
-Heartbeat messages are deferred for the MVP. The first version will send only alerts and recoveries.
+Heartbeat messages are deferred for the MVP. The first version sends pairing/startup status reports plus threshold-based alerts and recoveries.
 
 ## CLI And Packaging
 
@@ -258,9 +261,10 @@ On first run, DeltaOps should:
 3. Print contact data and a one-time pairing code for the bot.
 4. Wait for the first incoming message that contains the pairing code.
 5. Persist that sender as the alert recipient.
-6. Start sending alerts and recovery notices for configured checks.
+6. Send a pairing confirmation status report with the currently collected metrics.
+7. Start sending alerts and recovery notices for configured checks.
 
-After binding, later messages from other contacts should not receive host alerts unless the local reset flow is used.
+After binding, later messages from other contacts should not receive host alerts unless the local reset flow is used. On restarts with an existing binding, DeltaOps sends a startup status report before normal polling.
 
 ## Security Considerations
 
@@ -268,10 +272,10 @@ After binding, later messages from other contacts should not receive host alerts
 - The MVP accepts plaintext local state protected by filesystem permissions; OS keyring integration is deferred.
 - Treat full `dcaccount:` URLs as credentials. Do not commit them, place them in world-readable unit files, or pass them through shared shell history. Provider homepage URLs are usually public, but provider URLs with tokens or generated setup data are sensitive.
 - The pairing code prevents a random first sender from taking over alert delivery during setup. Anyone who can read startup output during the unbound window can pair the monitor.
-- Alert messages can reveal hostnames, resource pressure, filesystem targets, thresholds, and recovery state. The monitor should send them only to the persisted bound contact.
+- Status reports and alert messages can reveal hostnames, resource pressure, filesystem targets, thresholds, and recovery state. The monitor should send them only to the persisted bound contact.
 - Runtime logs redact fields that look like provisioning URLs, setup codes, message text, message bodies, errors, or causes. Normal lifecycle logs keep safe metadata such as metric, target, kind, and severity.
 - If Delta Chat delivery is unavailable, DeltaOps logs locally, retries with backoff, and avoids unbounded queues.
-- Heartbeat messages are deferred for the MVP to avoid notification noise before real alert behavior is proven.
+- Heartbeat messages are deferred for the MVP to avoid ongoing notification noise before real alert behavior is proven.
 
 ## Development
 
