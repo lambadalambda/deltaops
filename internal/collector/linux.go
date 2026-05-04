@@ -99,27 +99,40 @@ func (c *Collector) Collect(ctx context.Context) ([]Sample, error) {
 		)
 	}
 
-	meminfo, err := c.readProcMetric("meminfo", MetricMemoryPressurePercent)
-	if err != nil {
-		return nil, err
+	if metricEnabled(c.plan, MetricMemoryPressurePercent) {
+		meminfo, err := c.readProcMetric("meminfo", MetricMemoryPressurePercent)
+		if err != nil {
+			return nil, err
+		}
+		memoryPressure, err := MemoryPressureFromMeminfo(meminfo)
+		if err != nil {
+			return nil, err
+		}
+		samples = append(samples, Sample{Metric: MetricMemoryPressurePercent, Target: "memory", Value: memoryPressure})
 	}
-	memoryPressure, err := MemoryPressureFromMeminfo(meminfo)
-	if err != nil {
-		return nil, err
-	}
-	samples = append(samples, Sample{Metric: MetricMemoryPressurePercent, Target: "memory", Value: memoryPressure})
 
-	loadavg, err := c.readProcMetric("loadavg", MetricLoad1)
-	if err != nil {
-		return nil, err
+	if metricEnabled(c.plan, MetricLoad1) {
+		loadavg, err := c.readProcMetric("loadavg", MetricLoad1)
+		if err != nil {
+			return nil, err
+		}
+		load1, err := Load1FromLoadavg(loadavg)
+		if err != nil {
+			return nil, err
+		}
+		samples = append(samples, Sample{Metric: MetricLoad1, Target: "system", Value: load1})
 	}
-	load1, err := Load1FromLoadavg(loadavg)
-	if err != nil {
-		return nil, err
-	}
-	samples = append(samples, Sample{Metric: MetricLoad1, Target: "system", Value: load1})
 
 	return samples, nil
+}
+
+func metricEnabled(plan Plan, metric string) bool {
+	for _, definition := range plan.Metrics {
+		if definition.Name == metric && definition.DefaultEnabled {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Collector) readProcMetric(name, metric string) ([]byte, error) {

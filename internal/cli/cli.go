@@ -109,7 +109,7 @@ func runCommand(args []string, options Options) int {
 	if err := collector.ValidatePlatform(options.GOOS); err != nil {
 		return printStartupError(options.Stderr, &appruntime.OperatorError{
 			Message:    "unsupported operating system",
-			NextAction: "run DeltaOps on linux for the MVP collector set",
+			NextAction: "run DeltaOps on linux or macOS development mode",
 			Cause:      err,
 		})
 	}
@@ -254,7 +254,7 @@ func newRuntimeProcess(ctx context.Context, runtimeConfig RuntimeConfig, transpo
 
 	collector, err := collector.NewCollector(runtimeConfig.GOOS, collector.Dependencies{}, nil)
 	if err != nil {
-		return nil, &appruntime.OperatorError{Message: "cannot create host metric collector", NextAction: "run DeltaOps on a supported Linux host", Cause: err}
+		return nil, &appruntime.OperatorError{Message: "cannot create host metric collector", NextAction: "run DeltaOps on linux or macOS development mode", Cause: err}
 	}
 	host, err := os.Hostname()
 	if err != nil || strings.TrimSpace(host) == "" {

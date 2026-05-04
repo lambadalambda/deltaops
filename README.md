@@ -2,7 +2,7 @@
 
 DeltaOps is planned as a small Go system monitor that sends alerts through Delta Chat. The target deployment model is one portable `deltaops` binary that can be copied onto a host, run with minimal setup, and paired by messaging the bot from the operator's Delta Chat account.
 
-Status: Delta Chat integration, account provisioning, state layout, pairing logic, MVP metric-source decisions, the CLI entrypoint, and live Delta Chat transport wiring are in place. Release binaries still require prepared embedded RPC helper assets before they can run the live transport.
+Status: Delta Chat integration, account provisioning, state layout, pairing logic, MVP metric-source decisions, the CLI entrypoint, live Delta Chat transport wiring, and macOS development support are in place. Release binaries still require prepared embedded RPC helper assets before they can run the live transport.
 
 ## Goals
 
@@ -87,9 +87,9 @@ The binding is stored at `<state>/binding.json`. The MVP reset path is deliberat
 
 ## Platform And Metrics
 
-The MVP collector target is Linux only. Collector plan creation fails at runtime with a clear error on unsupported operating systems before collector startup.
+The MVP deployment collector target is Linux. macOS is also supported as a local development mode so the live Delta Chat product path can be exercised on a developer workstation.
 
-Default metrics planned for the MVP:
+Default Linux metrics planned for the MVP:
 
 1. `disk.used_percent`: `100 * (Blocks - Bfree) / Blocks` from `statfs`; unavailable when `Blocks == 0`.
 2. `disk.inodes_used_percent`: `100 * (Files - Ffree) / Files` from `statfs`; unavailable when `Files == 0`.
@@ -98,7 +98,14 @@ Default metrics planned for the MVP:
 
 CPU utilization is deferred for the MVP; load average is the initial CPU-pressure signal. Linux release builds must include matching embedded Delta Chat RPC server assets for their target architecture.
 
-The `internal/collector` package implements these Linux samples behind fakeable filesystem and `/proc` interfaces. Unavailable metric sources return clear unavailable errors instead of panics.
+macOS development mode currently collects only filesystem capacity metrics via `statfs`:
+
+1. `disk.used_percent`.
+2. `disk.inodes_used_percent`.
+
+macOS does not collect Linux `/proc` memory pressure or load metrics yet. It is intended for validating packaging, provisioning, pairing, transport startup, and runtime behavior from this workstation, not as the first production deployment target.
+
+The `internal/collector` package implements Linux samples behind fakeable filesystem and `/proc` interfaces, plus macOS filesystem samples behind the same filesystem boundary. Unavailable metric sources return clear unavailable errors instead of panics.
 
 The platform and metric-source decision is recorded in `meta/decisions/0004-mvp-platform-and-metrics.md`.
 
@@ -156,7 +163,7 @@ mise exec -- go build -o bin/deltaops ./cmd/deltaops
 
 The source tree does not commit upstream `deltachat-rpc-server` binaries. On Linux, a valid development `run` prepares the state layout and then exits with a clear next action explaining that a release must be built with the matching Delta Chat RPC helper asset. This preserves the one-file operator target while keeping the missing runtime dependency explicit.
 
-The MVP runtime platform is Linux. Non-Linux builds can compile developer commands such as `version`, but `run` rejects non-Linux operating systems before collector startup until macOS collector/runtime support is added. Cross-compilation requires more than setting `GOOS` and `GOARCH`: each supported architecture release must embed the corresponding upstream `deltachat-rpc-server` artifact built for that target.
+The MVP deployment platform is Linux. macOS `run` is supported for development with filesystem-only metrics. Other operating systems can compile developer commands such as `version`, but `run` rejects unsupported operating systems before collector startup. Cross-compilation requires more than setting `GOOS` and `GOARCH`: each supported architecture release must embed the corresponding upstream `deltachat-rpc-server` artifact built for that target.
 
 For `github.com/chatmail/rpc-client-go/v2` v2.49.0, the currently recognized helper asset names and checksums are:
 
@@ -173,6 +180,15 @@ sh scripts/prepare-dcrpc-assets.sh linux/amd64
 ```
 
 Prepare one helper target per release build so each `deltaops` binary embeds only the helper it needs. Use `sh scripts/prepare-dcrpc-assets.sh all` only for local cache/testing because a subsequent build embeds every prepared helper. The script downloads from `https://github.com/chatmail/core/releases/tag/v2.49.0`, verifies SHA-256 checksums, and places helpers under `internal/notify/dcrpc/assets/`. Embedded helper bytes are also checksum-validated before extraction. The helper is embedded into `deltaops`, extracted at runtime to `<state>/deltachat-rpc-helper` with executable `0700` permissions, and launched as a managed subprocess. Helper binaries are ignored by git because they are large upstream artifacts.
+
+For local macOS testing on Apple Silicon, prepare the Darwin helper before building:
+
+```sh
+sh scripts/prepare-dcrpc-assets.sh darwin/arm64
+mise exec -- go build -o bin/deltaops ./cmd/deltaops
+```
+
+Use `darwin/amd64` on Intel macOS. Without the prepared helper, `bin/deltaops run --dcaccount-url dcaccount:...` should reach the normal helper-packaging error instead of rejecting macOS as unsupported.
 
 ## Linux Service Example
 

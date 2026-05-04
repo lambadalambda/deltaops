@@ -5,19 +5,21 @@ import (
 	"testing"
 )
 
-func TestValidatePlatformAcceptsLinux(t *testing.T) {
-	if err := ValidatePlatform("linux"); err != nil {
-		t.Fatalf("ValidatePlatform returned error: %v", err)
+func TestValidatePlatformAcceptsSupportedOSes(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		if err := ValidatePlatform(goos); err != nil {
+			t.Fatalf("ValidatePlatform(%q) returned error: %v", goos, err)
+		}
 	}
 }
 
 func TestValidatePlatformRejectsUnsupportedOS(t *testing.T) {
-	err := ValidatePlatform("darwin")
+	err := ValidatePlatform("windows")
 	if err == nil {
 		t.Fatal("ValidatePlatform returned nil, want unsupported platform error")
 	}
 	message := err.Error()
-	for _, want := range []string{"darwin", "linux", "unsupported"} {
+	for _, want := range []string{"windows", "linux", "darwin", "unsupported"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("error %q does not include %q", message, want)
 		}
@@ -25,7 +27,7 @@ func TestValidatePlatformRejectsUnsupportedOS(t *testing.T) {
 }
 
 func TestNewPlanRejectsUnsupportedOS(t *testing.T) {
-	_, err := NewPlan("darwin")
+	_, err := NewPlan("windows")
 	if err == nil {
 		t.Fatal("NewPlan returned nil, want unsupported platform error")
 	}
@@ -44,6 +46,29 @@ func TestNewPlanReturnsLinuxMetricPlan(t *testing.T) {
 	}
 	if len(plan.Metrics) != len(MVPMetricDefinitions()) {
 		t.Fatalf("plan metric count = %d, want %d", len(plan.Metrics), len(MVPMetricDefinitions()))
+	}
+}
+
+func TestNewPlanReturnsDarwinDevelopmentMetricPlan(t *testing.T) {
+	plan, err := NewPlan("darwin")
+	if err != nil {
+		t.Fatalf("NewPlan returned error: %v", err)
+	}
+	if plan.GOOS != "darwin" {
+		t.Fatalf("GOOS = %q, want darwin", plan.GOOS)
+	}
+	if len(plan.Metrics) != 2 {
+		t.Fatalf("plan metric count = %d, want filesystem-only development metrics", len(plan.Metrics))
+	}
+	for _, metric := range []string{MetricDiskUsedPercent, MetricDiskInodesUsedPercent} {
+		if !planHasMetric(plan, metric) {
+			t.Fatalf("darwin plan missing %s", metric)
+		}
+	}
+	for _, metric := range []string{MetricMemoryPressurePercent, MetricLoad1} {
+		if planHasMetric(plan, metric) {
+			t.Fatalf("darwin plan unexpectedly includes Linux proc metric %s", metric)
+		}
 	}
 }
 
@@ -96,4 +121,13 @@ func TestMVPMetricDefinitions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func planHasMetric(plan Plan, metric string) bool {
+	for _, definition := range plan.Metrics {
+		if definition.Name == metric {
+			return true
+		}
+	}
+	return false
 }

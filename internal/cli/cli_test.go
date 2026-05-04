@@ -223,20 +223,20 @@ func TestRunReadsNestedConfigFileWithComments(t *testing.T) {
 
 func TestRunRejectsUnsupportedPlatformWithNextAction(t *testing.T) {
 	var out, errOut bytes.Buffer
-	exit := Run([]string{"run", "--dcaccount-url", "dcaccount:secret"}, testOptions(t, "darwin", nil, &out, &errOut))
+	exit := Run([]string{"run", "--dcaccount-url", "dcaccount:secret"}, testOptions(t, "windows", nil, &out, &errOut))
 
 	if exit != 2 {
 		t.Fatalf("exit = %d, want 2", exit)
 	}
 	message := errOut.String()
-	for _, want := range []string{"unsupported operating system", "linux", "next action"} {
+	for _, want := range []string{"unsupported operating system", "linux", "darwin", "next action"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("stderr %q does not include %q", message, want)
 		}
 	}
 }
 
-func TestRunRejectsUnsupportedPlatformBeforeProvisioning(t *testing.T) {
+func TestRunDarwinRequiresProvisioningBeforeRuntime(t *testing.T) {
 	var out, errOut bytes.Buffer
 	exit := Run([]string{"run"}, testOptions(t, "darwin", nil, &out, &errOut))
 
@@ -244,11 +244,34 @@ func TestRunRejectsUnsupportedPlatformBeforeProvisioning(t *testing.T) {
 		t.Fatalf("exit = %d, want 2", exit)
 	}
 	message := errOut.String()
-	if !strings.Contains(message, "unsupported operating system") || !strings.Contains(message, "next action") {
-		t.Fatalf("stderr %q does not include unsupported-platform next action", message)
+	if !strings.Contains(message, "startup configuration is incomplete") || !strings.Contains(message, "--dcaccount-url") {
+		t.Fatalf("stderr %q does not include provisioning next action", message)
 	}
-	if strings.Contains(message, "--dcaccount-url") {
-		t.Fatalf("stderr %q requested provisioning before rejecting unsupported platform", message)
+	if strings.Contains(message, "unsupported operating system") {
+		t.Fatalf("stderr %q rejected darwin before provisioning", message)
+	}
+}
+
+func TestRunDarwinReachesRuntimeFactory(t *testing.T) {
+	var out, errOut bytes.Buffer
+	var got RuntimeConfig
+	process := &fakeRuntimeProcess{}
+	options := testOptions(t, "darwin", nil, &out, &errOut)
+	options.GOARCH = "arm64"
+	options.RuntimeFactory = func(_ context.Context, config RuntimeConfig) (RuntimeProcess, error) {
+		got = config
+		return process, nil
+	}
+
+	exit := Run([]string{"run", "--dcaccount-url", "dcaccount:secret"}, options)
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", exit, errOut.String())
+	}
+	if got.GOOS != "darwin" || got.GOARCH != "arm64" {
+		t.Fatalf("runtime platform = %s/%s, want darwin/arm64", got.GOOS, got.GOARCH)
+	}
+	if !process.ran || !process.closed {
+		t.Fatalf("process ran/closed = %v/%v, want true/true", process.ran, process.closed)
 	}
 }
 

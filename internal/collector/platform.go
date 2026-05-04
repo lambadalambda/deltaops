@@ -5,7 +5,10 @@ import (
 	"runtime"
 )
 
-const MVPPlatform = "linux"
+const (
+	MVPPlatform               = "linux"
+	DarwinDevelopmentPlatform = "darwin"
+)
 
 const (
 	MetricDiskUsedPercent       = "disk.used_percent"
@@ -33,10 +36,10 @@ func ValidateRuntimePlatform() error {
 }
 
 func ValidatePlatform(goos string) error {
-	if goos == MVPPlatform {
+	if goos == MVPPlatform || goos == DarwinDevelopmentPlatform {
 		return nil
 	}
-	return fmt.Errorf("unsupported operating system %q: DeltaOps MVP collectors support linux only", goos)
+	return fmt.Errorf("unsupported operating system %q: DeltaOps collectors support linux and darwin development mode", goos)
 }
 
 func NewRuntimePlan() (Plan, error) {
@@ -47,7 +50,25 @@ func NewPlan(goos string) (Plan, error) {
 	if err := ValidatePlatform(goos); err != nil {
 		return Plan{}, err
 	}
-	return Plan{GOOS: goos, Metrics: MVPMetricDefinitions()}, nil
+	return Plan{GOOS: goos, Metrics: metricDefinitionsFor(goos)}, nil
+}
+
+func metricDefinitionsFor(goos string) []MetricDefinition {
+	if goos == DarwinDevelopmentPlatform {
+		return DarwinDevelopmentMetricDefinitions()
+	}
+	return MVPMetricDefinitions()
+}
+
+func DarwinDevelopmentMetricDefinitions() []MetricDefinition {
+	definitions := MVPMetricDefinitions()
+	darwin := make([]MetricDefinition, 0, 2)
+	for _, definition := range definitions {
+		if definition.Name == MetricDiskUsedPercent || definition.Name == MetricDiskInodesUsedPercent {
+			darwin = append(darwin, definition)
+		}
+	}
+	return darwin
 }
 
 func MVPMetricDefinitions() []MetricDefinition {

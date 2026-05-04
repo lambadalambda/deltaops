@@ -54,11 +54,11 @@ func TestLinuxCollectorUsesDefaultMountPoint(t *testing.T) {
 }
 
 func TestLinuxCollectorRejectsUnsupportedPlatform(t *testing.T) {
-	_, err := NewCollector("darwin", Dependencies{}, []string{"/"})
+	_, err := NewCollector("windows", Dependencies{}, []string{"/"})
 	if err == nil {
 		t.Fatal("NewCollector returned nil, want unsupported platform error")
 	}
-	if !strings.Contains(err.Error(), "linux") {
+	if !strings.Contains(err.Error(), "linux") || !strings.Contains(err.Error(), "darwin") {
 		t.Fatalf("error %q does not explain supported platform", err)
 	}
 }

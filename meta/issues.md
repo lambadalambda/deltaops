@@ -1,4 +1,3 @@
 - [ ] [Ship embedded Delta Chat RPC server assets](issues/ship-embedded-delta-chat-rpc-server-assets.md)
-- [ ] [Add macOS development support](issues/add-macos-development-support.md)
 - [ ] [Create Docker end-to-end test setup](issues/create-docker-end-to-end-test-setup.md)
 - [ ] [Evaluate alternative Delta Chat bindings later](issues/evaluate-alternative-delta-chat-bindings-later.md)
