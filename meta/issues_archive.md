@@ -14,3 +14,4 @@
 - [x] [Ship embedded Delta Chat RPC server assets](issues/ship-embedded-delta-chat-rpc-server-assets.md)
 - [x] [Support chatmail provider URL provisioning](issues/support-chatmail-provider-url-provisioning.md)
 - [x] [Send pairing and startup status reports](issues/send-pairing-and-startup-status-reports.md)
+- [x] [Build GitHub release binaries](issues/build-github-release-binaries.md)
