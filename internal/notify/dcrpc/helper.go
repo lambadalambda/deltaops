@@ -1,7 +1,9 @@
 package dcrpc
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,14 +15,16 @@ import (
 var (
 	ErrHelperUnavailable       = errors.New("Delta Chat RPC helper is not packaged")
 	ErrUnsupportedHelperTarget = errors.New("Delta Chat RPC helper target is unsupported")
+	ErrHelperChecksumMismatch  = errors.New("Delta Chat RPC helper checksum mismatch")
 )
 
 //go:embed assets/*
 var embeddedHelperFS embed.FS
 
 type HelperAsset struct {
-	Filename string
-	Data     []byte
+	Filename       string
+	Data           []byte
+	ExpectedSHA256 string
 }
 
 func EmbeddedHelpers() []HelperAsset {
@@ -37,7 +41,7 @@ func EmbeddedHelpers() []HelperAsset {
 		if err != nil || len(data) == 0 {
 			continue
 		}
-		assets = append(assets, HelperAsset{Filename: entry.Name(), Data: data})
+		assets = append(assets, HelperAsset{Filename: entry.Name(), Data: data, ExpectedSHA256: helperSHA256(entry.Name())})
 	}
 	return assets
 }
@@ -49,26 +53,34 @@ func SelectHelper(assets []HelperAsset, goos, goarch string) (HelperAsset, error
 	}
 	for _, asset := range assets {
 		if asset.Filename == want && len(asset.Data) > 0 {
+			if err := ValidateHelperAsset(asset); err != nil {
+				return HelperAsset{}, err
+			}
 			return asset, nil
 		}
 	}
 	return HelperAsset{}, fmt.Errorf("%w: missing %s", ErrHelperUnavailable, want)
 }
 
+func ValidateHelperAsset(asset HelperAsset) error {
+	if asset.ExpectedSHA256 == "" {
+		return nil
+	}
+	sum := sha256.Sum256(asset.Data)
+	actual := hex.EncodeToString(sum[:])
+	if actual != asset.ExpectedSHA256 {
+		return fmt.Errorf("%w: %s", ErrHelperChecksumMismatch, asset.Filename)
+	}
+	return nil
+}
+
 func HelperFilename(goos, goarch string) (string, bool) {
-	if goos != "linux" {
-		return "", false
+	for _, asset := range helperReleaseAssets {
+		if asset.GOOS == goos && asset.GOARCH == goarch {
+			return asset.Filename, true
+		}
 	}
-	switch goarch {
-	case "amd64":
-		return "deltachat-rpc-server-x86_64-linux", true
-	case "arm64":
-		return "deltachat-rpc-server-aarch64-linux", true
-	case "386":
-		return "deltachat-rpc-server-i686-linux", true
-	default:
-		return "", false
-	}
+	return "", false
 }
 
 func ExtractHelper(asset HelperAsset, dir string) (string, error) {

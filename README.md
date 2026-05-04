@@ -2,7 +2,7 @@
 
 DeltaOps is planned as a small Go system monitor that sends alerts through Delta Chat. The target deployment model is one portable `deltaops` binary that can be copied onto a host, run with minimal setup, and paired by messaging the bot from the operator's Delta Chat account.
 
-Status: Delta Chat integration, account provisioning, state layout, pairing logic, MVP metric-source decisions, the CLI entrypoint, and live Delta Chat transport wiring are in place. Release binaries still require an embedded RPC helper asset to run on Linux.
+Status: Delta Chat integration, account provisioning, state layout, pairing logic, MVP metric-source decisions, the CLI entrypoint, and live Delta Chat transport wiring are in place. Release binaries still require prepared embedded RPC helper assets before they can run the live transport.
 
 ## Goals
 
@@ -16,7 +16,7 @@ Status: Delta Chat integration, account provisioning, state layout, pairing logi
 
 ## Quickstart
 
-This is the intended operator flow for a Linux release build that embeds the matching `deltachat-rpc-server` helper. The current source tree does not commit helper binaries, so development builds validate startup and then exit with a next action until a release asset is added.
+This is the intended operator flow for a Linux release build that embeds the matching `deltachat-rpc-server` helper. The current source tree does not commit helper binaries, so development builds validate startup and then exit with a next action until a release asset is prepared.
 
 1. Install the `deltaops` binary on the monitored Linux host, for example at `/usr/local/bin/deltaops`.
 2. Create a private state directory, for example `/var/lib/deltaops`, owned by the service user and mode `0700`.
@@ -156,15 +156,23 @@ mise exec -- go build -o bin/deltaops ./cmd/deltaops
 
 The source tree does not commit upstream `deltachat-rpc-server` binaries. On Linux, a valid development `run` prepares the state layout and then exits with a clear next action explaining that a release must be built with the matching Delta Chat RPC helper asset. This preserves the one-file operator target while keeping the missing runtime dependency explicit.
 
-The MVP runtime platform is Linux. Non-Linux builds can compile developer commands such as `version`, but `run` rejects non-Linux operating systems before collector startup. Cross-compilation requires more than setting `GOOS` and `GOARCH`: each supported Linux architecture release must embed the corresponding upstream `deltachat-rpc-server` artifact built for that target.
+The MVP runtime platform is Linux. Non-Linux builds can compile developer commands such as `version`, but `run` rejects non-Linux operating systems before collector startup until macOS collector/runtime support is added. Cross-compilation requires more than setting `GOOS` and `GOARCH`: each supported architecture release must embed the corresponding upstream `deltachat-rpc-server` artifact built for that target.
 
-For `github.com/chatmail/rpc-client-go/v2` v2.49.0, the currently recognized helper asset names are:
+For `github.com/chatmail/rpc-client-go/v2` v2.49.0, the currently recognized helper asset names and checksums are:
 
-1. `deltachat-rpc-server-x86_64-linux` for `linux/amd64`.
-2. `deltachat-rpc-server-aarch64-linux` for `linux/arm64`.
-3. `deltachat-rpc-server-i686-linux` for `linux/386`.
+1. `linux/amd64`: `deltachat-rpc-server-x86_64-linux`, SHA-256 `28e10b40518f55fa8ce20edd119fa743dd29a22df372b58443ec53eb753cb50c`.
+2. `linux/arm64`: `deltachat-rpc-server-aarch64-linux`, SHA-256 `33acdc048060fcd51bc585f2eefdaa2cf93cca9306440f45be8c5936024732cf`.
+3. `linux/386`: `deltachat-rpc-server-i686-linux`, SHA-256 `6fe6831f0bcd84316dafa416883249aba623eb392b7795769d7b9f635dc069b6`.
+4. `darwin/arm64`: `deltachat-rpc-server-aarch64-macos`, SHA-256 `3ea30551ddaa67c2691c1cfbf0087ad95b799c5192269aada232ca2569891789`.
+5. `darwin/amd64`: `deltachat-rpc-server-x86_64-macos`, SHA-256 `a8885769dc24eacd605b32593332de138fc77d97550b709c330d4fd4479b48c9`.
 
-Place the selected helper under `internal/notify/dcrpc/assets/` before building a release. The helper is embedded into `deltaops`, extracted at runtime to `<state>/deltachat-rpc-helper` with executable `0700` permissions, and launched as a managed subprocess. Do not commit helper binaries until a release-asset policy is reviewed, because they are large upstream artifacts.
+Prepare selected helpers before building a release:
+
+```sh
+sh scripts/prepare-dcrpc-assets.sh linux/amd64
+```
+
+Prepare one helper target per release build so each `deltaops` binary embeds only the helper it needs. Use `sh scripts/prepare-dcrpc-assets.sh all` only for local cache/testing because a subsequent build embeds every prepared helper. The script downloads from `https://github.com/chatmail/core/releases/tag/v2.49.0`, verifies SHA-256 checksums, and places helpers under `internal/notify/dcrpc/assets/`. Embedded helper bytes are also checksum-validated before extraction. The helper is embedded into `deltaops`, extracted at runtime to `<state>/deltachat-rpc-helper` with executable `0700` permissions, and launched as a managed subprocess. Helper binaries are ignored by git because they are large upstream artifacts.
 
 ## Linux Service Example
 

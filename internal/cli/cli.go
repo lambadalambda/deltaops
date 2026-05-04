@@ -218,7 +218,7 @@ func defaultRuntimeFactory(ctx context.Context, runtimeConfig RuntimeConfig) (Ru
 		if errors.Is(err, dcrpc.ErrUnsupportedHelperTarget) {
 			return nil, &appruntime.OperatorError{
 				Message:    "Delta Chat RPC helper target is unsupported",
-				NextAction: "run a supported linux/amd64, linux/arm64, or linux/386 build, or add a reviewed helper mapping for this target",
+				NextAction: "run a build with one of these embedded helper targets: " + strings.Join(dcrpc.SupportedHelperTargets(), ", "),
 				Cause:      err,
 			}
 		}

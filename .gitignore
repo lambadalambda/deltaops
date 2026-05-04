@@ -7,6 +7,7 @@
 /.deltaops/
 /deltaops-state/
 /dc-data/
+/internal/notify/dcrpc/assets/deltachat-rpc-server-*
 *.out
 *.test
 .DS_Store
